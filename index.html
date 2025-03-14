@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Gestión de Datos</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .login-container {
+            max-width: 400px;
+            margin: 100px auto;
+            padding: 20px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        .dashboard {
+            display: none;
+        }
+        header {
+            background-color: #4285f4;
+            color: white;
+            padding: 15px;
+            border-radius: 8px 8px 0 0;
+            margin-bottom: 20px;
+        }
+        h1, h2 {
+            margin: 0;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        input[type="text"],
+        input[type="password"],
+        select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #4285f4;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #3367d6;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            background-color: white;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #f2f2f2;
+            font-weight: 600;
+        }
+        .user-info {
+            text-align: right;
+            margin-bottom: 20px;
+        }
+        .admin-panel {
+            margin-top: 30px;
+            padding: 20px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+</head>
+<body>
+    <!-- Contenedor de Login -->
+    <div class="login-container" id="loginForm">
+        <header>
+            <h2>Iniciar Sesión</h2>
+        </header>
+        <div class="form-group">
+            <label for="username">Usuario:</label>
+            <input type="text" id="username" placeholder="Ingrese su usuario">
+        </div>
+        <div class="form-group">
+            <label for="password">Contraseña:</label>
+            <input type="password" id="password" placeholder="Ingrese su contraseña">
+        </div>
+        <button onclick="login()">Ingresar</button>
+    </div>
+
+    <!-- Dashboard Principal -->
+    <div class="container dashboard" id="dashboard">
+        <header>
+            <h1>Sistema de Gestión de Datos</h1>
+        </header>
+        
+        <div class="user-info">
+            <span id="currentUser">Usuario: </span>
+            <button onclick="logout()">Cerrar Sesión</button>
+        </div>
+
+        <div class="form-group">
+            <label for="filtro">Filtrar por:</label>
+            <select id="filtro" onchange="filtrarDatos()">
+                <option value="todos">Todos los registros</option>
+                <option value="pendientes">Pendientes</option>
+                <option value="completados">Completados</option>
+            </select>
+        </div>
+
+        <table id="datosTabla">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Fecha</th>
+                    <th>Descripción</th>
+                    <th>Responsable</th>
+                    <th>Estado</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody id="datosCuerpo">
+                <!-- Los datos se cargarán dinámicamente -->
+            </tbody>
+        </table>
+
+        <div id="formularioDatos" style="margin-top: 20px;">
+            <h3>Agregar Nuevo Registro</h3>
+            <div class="form-group">
+                <label for="descripcion">Descripción:</label>
+                <input type="text" id="descripcion" placeholder="Descripción del registro">
+            </div>
+            <div class="form-group">
+                <label for="estado">Estado:</label>
+                <select id="estado">
+                    <option value="pendiente">Pendiente</option>
+                    <option value="en_proceso">En Proceso</option>
+                    <option value="completado">Completado</option>
+                </select>
+            </div>
+            <button onclick="agregarRegistro()">Guardar Registro</button>
+        </div>
+
+        <!-- Panel de Administrador (solo visible para admin) -->
+        <div class="admin-panel" id="adminPanel" style="display: none;">
+            <h2>Panel de Administración</h2>
+            
+            <h3>Gestión de Usuarios</h3>
+            <div class="form-group">
+                <label for="nuevoUsuario">Nuevo Usuario:</label>
+                <input type="text" id="nuevoUsuario" placeholder="Nombre de usuario">
+            </div>
+            <div class="form-group">
+                <label for="nuevaContrasena">Contraseña:</label>
+                <input type="password" id="nuevaContrasena" placeholder="Contraseña">
+            </div>
+            <div class="form-group">
+                <label for="tipoUsuario">Tipo de Usuario:</label>
+                <select id="tipoUsuario">
+                    <option value="usuario">Usuario Regular</option>
+                    <option value="admin">Administrador</option>
+                </select>
+            </div>
+            <button onclick="agregarUsuario()">Agregar Usuario</button>
+            
+            <h3 style="margin-top: 20px;">Usuarios Existentes</h3>
+            <table id="usuariosTabla">
+                <thead>
+                    <tr>
+                        <th>Usuario</th>
+                        <th>Tipo</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody id="usuariosCuerpo">
+                    <!-- Los usuarios se cargarán dinámicamente -->
+                </tbody>
+            </table>
+
+            <h3 style="margin-top: 20px;">Exportar Datos</h3>
+            <button onclick="exportarDatos()">Exportar a Excel</button>
+        </div>
+    </div>
+
+    <script>
+        // Datos de muestra (esto se reemplazaría con almacenamiento real como localStorage, IndexedDB o backend)
+        let usuarios = [
+            { username: 'admin', password: 'admin123', tipo: 'admin' },
+            { username: 'usuario1', password: 'user123', tipo: 'usuario' },
+            { username: 'usuario2', password: 'user456', tipo: 'usuario' }
+        ];
+
+        let datos = [
+            { id: 1, fecha: '2025-03-10', descripcion: 'Informe de ventas', responsable: 'usuario1', estado: 'completado' },
+            { id: 2, fecha: '2025-03-12', descripcion: 'Actualización de inventario', responsable: 'usuario2', estado: 'pendiente' },
+            { id: 3, fecha: '2025-03-14', descripcion: 'Revisión de presupuesto', responsable: 'admin', estado: 'en_proceso' }
+        ];
+
+        let usuarioActual = null;
+
+        // Simular inicio de sesión
+        function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            const usuario = usuarios.find(u => u.username === username && u.password === password);
+            
+            if (usuario) {
+                usuarioActual = usuario;
+                document.getElementById('loginForm').style.display = 'none';
+                document.getElementById('dashboard').style.display = 'block';
+                document.getElementById('currentUser').textContent = 'Usuario: ' + usuario.username;
+                
+                // Mostrar panel de admin solo si es administrador
+                if (usuario.tipo === 'admin') {
+                    document.getElementById('adminPanel').style.display = 'block';
+                    cargarUsuariosTabla();
+                } else {
+                    document.getElementById('adminPanel').style.display = 'none';
+                }
+                
+                cargarDatosTabla();
+            } else {
+                alert('Usuario o contraseña incorrectos');
+            }
+        }
+
+        function logout() {
+            usuarioActual = null;
+            document.getElementById('loginForm').style.display = 'block';
+            document.getElementById('dashboard').style.display = 'none';
+            document.getElementById('username').value = '';
+            document.getElementById('password').value = '';
+        }
+
+        function cargarDatosTabla(filtro = 'todos') {
+            const tbody = document.getElementById('datosCuerpo');
+            tbody.innerHTML = '';
+            
+            let datosFiltrados = datos;
+            if (filtro === 'pendientes') {
+                datosFiltrados = datos.filter(d => d.estado === 'pendiente');
+            } else if (filtro === 'completados') {
+                datosFiltrados = datos.filter(d => d.estado === 'completado');
+            }
+            
+            datosFiltrados.forEach(dato => {
+                const tr = document.createElement('tr');
+                
+                tr.innerHTML = `
+                    <td>${dato.id}</td>
+                    <td>${dato.fecha}</td>
+                    <td>${dato.descripcion}</td>
+                    <td>${dato.responsable}</td>
+                    <td>${dato.estado}</td>
+                    <td>
+                        <button onclick="editarRegistro(${dato.id})">Editar</button>
+                        ${usuarioActual.tipo === 'admin' ? `<button onclick="eliminarRegistro(${dato.id})">Eliminar</button>` : ''}
+                    </td>
+                `;
+                
+                tbody.appendChild(tr);
+            });
+        }
+
+        function filtrarDatos() {
+            const filtro = document.getElementById('filtro').value;
+            cargarDatosTabla(filtro);
+        }
+
+        function agregarRegistro() {
+            const descripcion = document.getElementById('descripcion').value;
+            const estado = document.getElementById('estado').value;
+            
+            if (!descripcion) {
+                alert('Por favor ingrese una descripción');
+                return;
+            }
+            
+            const nuevoId = datos.length > 0 ? Math.max(...datos.map(d => d.id)) + 1 : 1;
+            const fechaActual = new Date().toISOString().split('T')[0];
+            
+            datos.push({
+                id: nuevoId,
+                fecha: fechaActual,
+                descripcion: descripcion,
+                responsable: usuarioActual.username,
+                estado: estado
+            });
+            
+            document.getElementById('descripcion').value = '';
+            cargarDatosTabla();
+        }
+
+        function editarRegistro(id) {
+            const registro = datos.find(d => d.id === id);
+            if (!registro) return;
+            
+            const nuevaDescripcion = prompt('Editar descripción:', registro.descripcion);
+            const nuevoEstado = prompt('Editar estado (pendiente, en_proceso, completado):', registro.estado);
+            
+            if (nuevaDescripcion !== null && nuevoEstado !== null) {
+                registro.descripcion = nuevaDescripcion;
+                registro.estado = nuevoEstado;
+                cargarDatosTabla();
+            }
+        }
+
+        function eliminarRegistro(id) {
+            if (confirm('¿Está seguro de eliminar este registro?')) {
+                datos = datos.filter(d => d.id !== id);
+                cargarDatosTabla();
+            }
+        }
+
+        // Funciones de administrador
+        function cargarUsuariosTabla() {
+            const tbody = document.getElementById('usuariosCuerpo');
+            tbody.innerHTML = '';
+            
+            usuarios.forEach(usuario => {
+                const tr = document.createElement('tr');
+                
+                tr.innerHTML = `
+                    <td>${usuario.username}</td>
+                    <td>${usuario.tipo}</td>
+                    <td>
+                        <button onclick="cambiarTipoUsuario('${usuario.username}')">Cambiar Tipo</button>
+                        <button onclick="eliminarUsuario('${usuario.username}')">Eliminar</button>
+                    </td>
+                `;
+                
+                tbody.appendChild(tr);
+            });
+        }
+
+        function agregarUsuario() {
+            const nuevoUsuario = document.getElementById('nuevoUsuario').value;
+            const nuevaContrasena = document.getElementById('nuevaContrasena').value;
+            const tipoUsuario = document.getElementById('tipoUsuario').value;
+            
+            if (!nuevoUsuario || !nuevaContrasena) {
+                alert('Por favor complete todos los campos');
+                return;
+            }
+            
+            if (usuarios.some(u => u.username === nuevoUsuario)) {
+                alert('El nombre de usuario ya existe');
+                return;
+            }
+            
+            usuarios.push({
+                username: nuevoUsuario,
+                password: nuevaContrasena,
+                tipo: tipoUsuario
+            });
+            
+            document.getElementById('nuevoUsuario').value = '';
+            document.getElementById('nuevaContrasena').value = '';
+            cargarUsuariosTabla();
+        }
+
+        function cambiarTipoUsuario(username) {
+            const usuario = usuarios.find(u => u.username === username);
+            if (!usuario) return;
+            
+            const nuevoTipo = usuario.tipo === 'admin' ? 'usuario' : 'admin';
+            usuario.tipo = nuevoTipo;
+            cargarUsuariosTabla();
+        }
+
+        function eliminarUsuario(username) {
+            if (username === 'admin') {
+                alert('No se puede eliminar al usuario administrador principal');
+                return;
+            }
+            
+            if (confirm('¿Está seguro de eliminar este usuario?')) {
+                usuarios = usuarios.filter(u => u.username !== username);
+                cargarUsuariosTabla();
+            }
+        }
+
+        function exportarDatos() {
+            // En una implementación real, esto crearía un archivo Excel
+            alert('Exportando datos a Excel...');
+            
+            // Aquí se podría usar librerías como SheetJS para la exportación real
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(datos));
+            const downloadAnchorNode = document.createElement('a');
+            downloadAnchorNode.setAttribute("href", dataStr);
+            downloadAnchorNode.setAttribute("download", "datos_exportados.json");
+            document.body.appendChild(downloadAnchorNode);
+            downloadAnchorNode.click();
+            downloadAnchorNode.remove();
+        }
+    </script>
+</body>
+</html>
