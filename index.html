@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sistema de Gestión de Datos</title>
+    <!-- Incluimos SheetJS para manejo de Excel -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -93,6 +95,46 @@
             border-radius: 8px;
             box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
         }
+        .import-container {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            border: 1px dashed #ccc;
+        }
+        .tabs {
+            display: flex;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #ddd;
+        }
+        .tab {
+            padding: 10px 15px;
+            cursor: pointer;
+            background-color: #f5f5f5;
+            margin-right: 5px;
+            border-radius: 5px 5px 0 0;
+        }
+        .tab.active {
+            background-color: #4285f4;
+            color: white;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .status-message {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            background-color: #e8f5e9;
+            color: #388e3c;
+        }
+        .status-message.error {
+            background-color: #ffebee;
+            color: #d32f2f;
+        }
     </style>
 </head>
 <body>
@@ -123,30 +165,65 @@
             <button onclick="logout()">Cerrar Sesión</button>
         </div>
 
-        <div class="form-group">
-            <label for="filtro">Filtrar por:</label>
-            <select id="filtro" onchange="filtrarDatos()">
-                <option value="todos">Todos los registros</option>
-                <option value="pendientes">Pendientes</option>
-                <option value="completados">Completados</option>
-            </select>
+        <!-- Pestañas de navegación -->
+        <div class="tabs">
+            <div class="tab active" onclick="cambiarTab('datosGenerales')">Vista General</div>
+            <div class="tab" onclick="cambiarTab('misPlanillas')">Mis Planillas</div>
+            <div class="tab" onclick="cambiarTab('importarDatos')">Importar Datos</div>
         </div>
 
-        <table id="datosTabla">
-            <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>Fecha</th>
-                    <th>Descripción</th>
-                    <th>Responsable</th>
-                    <th>Estado</th>
-                    <th>Acciones</th>
-                </tr>
-            </thead>
-            <tbody id="datosCuerpo">
-                <!-- Los datos se cargarán dinámicamente -->
-            </tbody>
-        </table>
+        <!-- Tab 1: Vista general de todos los datos -->
+        <div class="tab-content active" id="datosGenerales">
+            <div class="form-group">
+                <label for="filtro">Filtrar por:</label>
+                <select id="filtro" onchange="filtrarDatos()">
+                    <option value="todos">Todos los registros</option>
+                    <option value="pendientes">Pendientes</option>
+                    <option value="completados">Completados</option>
+                </select>
+            </div>
+
+            <table id="datosTabla">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Fecha</th>
+                        <th>Descripción</th>
+                        <th>Responsable</th>
+                        <th>Estado</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody id="datosCuerpo">
+                    <!-- Los datos se cargarán dinámicamente -->
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Tab 2: Mis planillas individuales -->
+        <div class="tab-content" id="misPlanillas">
+            <h2>Mis Planillas</h2>
+            <div id="misPlanillasLista">
+                <!-- Aquí se mostrarán las planillas del usuario -->
+            </div>
+        </div>
+        
+        <!-- Tab 3: Importar datos desde Excel -->
+        <div class="tab-content" id="importarDatos">
+            <h2>Importar Datos desde Excel</h2>
+            <div class="import-container">
+                <div class="form-group">
+                    <label for="excelFile">Selecciona tu archivo Excel:</label>
+                    <input type="file" id="excelFile" accept=".xlsx, .xls, .csv" />
+                </div>
+                <div class="form-group">
+                    <label for="planillaNombre">Nombre para esta planilla:</label>
+                    <input type="text" id="planillaNombre" placeholder="Ej: Ventas Enero 2025" />
+                </div>
+                <button onclick="importarExcel()">Importar Datos</button>
+                <div id="importStatus" class="status-message" style="display: none;"></div>
+            </div>
+        </div>
 
         <div id="formularioDatos" style="margin-top: 20px;">
             <h3>Agregar Nuevo Registro</h3>
@@ -207,7 +284,7 @@
     </div>
 
     <script>
-        // Datos de muestra (esto se reemplazaría con almacenamiento real como localStorage, IndexedDB o backend)
+        // Datos iniciales (se cargarán desde localStorage si existen)
         let usuarios = [
             { username: 'admin', password: 'admin123', tipo: 'admin' },
             { username: 'usuario1', password: 'user123', tipo: 'usuario' },
@@ -219,13 +296,55 @@
             { id: 2, fecha: '2025-03-12', descripcion: 'Actualización de inventario', responsable: 'usuario2', estado: 'pendiente' },
             { id: 3, fecha: '2025-03-14', descripcion: 'Revisión de presupuesto', responsable: 'admin', estado: 'en_proceso' }
         ];
+        
+        // Estructura para almacenar planillas individuales por usuario
+        let planillas = [];
 
         let usuarioActual = null;
+        
+        // Cargar datos desde localStorage al iniciar
+        function cargarDatosLocales() {
+            const usuariosGuardados = localStorage.getItem('usuarios');
+            const datosGuardados = localStorage.getItem('datos');
+            const planillasGuardadas = localStorage.getItem('planillas');
+            
+            if (usuariosGuardados) {
+                usuarios = JSON.parse(usuariosGuardados);
+            }
+            
+            if (datosGuardados) {
+                datos = JSON.parse(datosGuardados);
+            }
+            
+            if (planillasGuardadas) {
+                planillas = JSON.parse(planillasGuardadas);
+            }
+        }
+        
+        // Guardar datos en localStorage
+        function guardarDatos() {
+            localStorage.setItem('usuarios', JSON.stringify(usuarios));
+            localStorage.setItem('datos', JSON.stringify(datos));
+            localStorage.setItem('planillas', JSON.stringify(planillas));
+            
+            // Mostrar mensaje de guardado
+            const statusElement = document.createElement('div');
+            statusElement.className = 'status-message';
+            statusElement.textContent = 'Datos guardados correctamente ' + new Date().toLocaleTimeString();
+            document.body.appendChild(statusElement);
+            
+            setTimeout(() => {
+                statusElement.remove();
+            }, 3000);
+        }
 
-        // Simular inicio de sesión
+        // Inicio de sesión
         function login() {
             const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
+            
+            // Cargar datos almacenados primero
+            cargarDatosLocales();
             
             const usuario = usuarios.find(u => u.username === username && u.password === password);
             
@@ -244,17 +363,44 @@
                 }
                 
                 cargarDatosTabla();
+                cargarPlanillasUsuario();
+                
+                // Configurar guardado automático cada 5 minutos
+                setInterval(guardarDatos, 5 * 60 * 1000);
             } else {
                 alert('Usuario o contraseña incorrectos');
             }
         }
 
         function logout() {
+            // Guardar datos antes de cerrar sesión
+            guardarDatos();
+            
             usuarioActual = null;
             document.getElementById('loginForm').style.display = 'block';
             document.getElementById('dashboard').style.display = 'none';
             document.getElementById('username').value = '';
             document.getElementById('password').value = '';
+        }
+        
+        // Función para cambiar entre pestañas
+        function cambiarTab(tabId) {
+            // Ocultar todas las pestañas
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Desactivar todos los botones de pestañas
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Activar la pestaña seleccionada
+            document.getElementById(tabId).classList.add('active');
+            
+            // Activar el botón de la pestaña
+            const index = ['datosGenerales', 'misPlanillas', 'importarDatos'].indexOf(tabId);
+            document.querySelectorAll('.tab')[index].classList.add('active');
         }
 
         function cargarDatosTabla(filtro = 'todos') {
@@ -314,6 +460,253 @@
             
             document.getElementById('descripcion').value = '';
             cargarDatosTabla();
+            
+            // Guardar datos automáticamente
+            guardarDatos();
+        }
+        
+        // Función para importar datos desde Excel
+        function importarExcel() {
+            const fileInput = document.getElementById('excelFile');
+            const nombrePlanilla = document.getElementById('planillaNombre').value;
+            const statusElement = document.getElementById('importStatus');
+            
+            if (!fileInput.files.length) {
+                mostrarEstado('Por favor selecciona un archivo Excel', true);
+                return;
+            }
+            
+            if (!nombrePlanilla) {
+                mostrarEstado('Por favor ingresa un nombre para esta planilla', true);
+                return;
+            }
+            
+            const file = fileInput.files[0];
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                try {
+                    const data = e.target.result;
+                    const workbook = XLSX.read(data, { type: 'binary' });
+                    const sheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[sheetName];
+                    const json = XLSX.utils.sheet_to_json(worksheet);
+                    
+                    // Guardar la planilla en el sistema
+                    const nuevaPlanilla = {
+                        id: Date.now(),
+                        nombre: nombrePlanilla,
+                        usuario: usuarioActual.username,
+                        fecha: new Date().toISOString().split('T')[0],
+                        datos: json
+                    };
+                    
+                    planillas.push(nuevaPlanilla);
+                    
+                    // Convertir datos de la planilla al formato de la aplicación
+                    json.forEach(item => {
+                        // Intentamos mapear las columnas de Excel a nuestro formato
+                        const nuevoRegistro = {
+                            id: datos.length > 0 ? Math.max(...datos.map(d => d.id)) + 1 : 1,
+                            fecha: new Date().toISOString().split('T')[0],
+                            descripcion: item.Descripcion || item.descripcion || item.Concepto || item.concepto || Object.values(item)[0],
+                            responsable: usuarioActual.username,
+                            estado: 'pendiente',
+                            planillaId: nuevaPlanilla.id
+                        };
+                        
+                        datos.push(nuevoRegistro);
+                    });
+                    
+                    // Actualizar vistas
+                    cargarDatosTabla();
+                    cargarPlanillasUsuario();
+                    
+                    // Guardar datos
+                    guardarDatos();
+                    
+                    mostrarEstado(`Planilla "${nombrePlanilla}" importada correctamente con ${json.length} registros`, false);
+                    
+                    // Limpiar campos
+                    fileInput.value = '';
+                    document.getElementById('planillaNombre').value = '';
+                    
+                } catch (error) {
+                    console.error("Error al procesar el archivo:", error);
+                    mostrarEstado("Error al procesar el archivo: " + error.message, true);
+                }
+            };
+            
+            reader.onerror = function() {
+                mostrarEstado("Error al leer el archivo", true);
+            };
+            
+            reader.readAsBinaryString(file);
+        }
+        
+        // Mostrar mensaje de estado
+        function mostrarEstado(mensaje, esError) {
+            const statusElement = document.getElementById('importStatus');
+            statusElement.textContent = mensaje;
+            statusElement.style.display = 'block';
+            
+            if (esError) {
+                statusElement.classList.add('error');
+            } else {
+                statusElement.classList.remove('error');
+            }
+            
+            setTimeout(() => {
+                statusElement.style.display = 'none';
+            }, 5000);
+        }
+        
+        // Cargar planillas del usuario actual
+        function cargarPlanillasUsuario() {
+            const planillasContainer = document.getElementById('misPlanillasLista');
+            planillasContainer.innerHTML = '';
+            
+            const misPlanillas = planillas.filter(p => p.usuario === usuarioActual.username);
+            
+            if (misPlanillas.length === 0) {
+                planillasContainer.innerHTML = '<p>No tienes planillas importadas. Ve a la pestaña "Importar Datos" para agregar tu primera planilla.</p>';
+                return;
+            }
+            
+            misPlanillas.forEach(planilla => {
+                const planillaDiv = document.createElement('div');
+                planillaDiv.className = 'import-container';
+                
+                const planillaHeader = document.createElement('h3');
+                planillaHeader.textContent = planilla.nombre;
+                
+                const planillaInfo = document.createElement('p');
+                planillaInfo.textContent = `Importada el ${planilla.fecha} • ${planilla.datos.length} registros`;
+                
+                const planillaAcciones = document.createElement('div');
+                planillaAcciones.style.marginTop = '10px';
+                
+                const verButton = document.createElement('button');
+                verButton.textContent = 'Ver Datos';
+                verButton.onclick = () => mostrarDetallePlanilla(planilla);
+                
+                const eliminarButton = document.createElement('button');
+                eliminarButton.textContent = 'Eliminar';
+                eliminarButton.style.marginLeft = '10px';
+                eliminarButton.style.backgroundColor = '#f44336';
+                eliminarButton.onclick = () => eliminarPlanilla(planilla.id);
+                
+                planillaAcciones.appendChild(verButton);
+                planillaAcciones.appendChild(eliminarButton);
+                
+                planillaDiv.appendChild(planillaHeader);
+                planillaDiv.appendChild(planillaInfo);
+                planillaDiv.appendChild(planillaAcciones);
+                
+                planillasContainer.appendChild(planillaDiv);
+            });
+        }
+        
+        // Mostrar detalle de una planilla
+        function mostrarDetallePlanilla(planilla) {
+            // Crear un modal o div temporal para mostrar los datos
+            const modal = document.createElement('div');
+            modal.style.position = 'fixed';
+            modal.style.left = '0';
+            modal.style.top = '0';
+            modal.style.width = '100%';
+            modal.style.height = '100%';
+            modal.style.backgroundColor = 'rgba(0,0,0,0.7)';
+            modal.style.zIndex = '1000';
+            modal.style.display = 'flex';
+            modal.style.justifyContent = 'center';
+            modal.style.alignItems = 'center';
+            
+            const modalContent = document.createElement('div');
+            modalContent.style.backgroundColor = 'white';
+            modalContent.style.padding = '20px';
+            modalContent.style.borderRadius = '8px';
+            modalContent.style.width = '80%';
+            modalContent.style.maxHeight = '80%';
+            modalContent.style.overflow = 'auto';
+            
+            // Agregar botón para cerrar
+            const closeBtn = document.createElement('button');
+            closeBtn.textContent = 'X';
+            closeBtn.style.float = 'right';
+            closeBtn.style.backgroundColor = '#f44336';
+            closeBtn.style.color = 'white';
+            closeBtn.style.border = 'none';
+            closeBtn.style.borderRadius = '4px';
+            closeBtn.style.padding = '5px 10px';
+            closeBtn.onclick = () => document.body.removeChild(modal);
+            
+            modalContent.appendChild(closeBtn);
+            
+            // Agregar título
+            const title = document.createElement('h2');
+            title.textContent = `Planilla: ${planilla.nombre}`;
+            modalContent.appendChild(title);
+            
+            // Crear tabla para mostrar datos
+            const table = document.createElement('table');
+            table.style.width = '100%';
+            table.style.borderCollapse = 'collapse';
+            table.style.marginTop = '15px';
+            
+            // Crear encabezados
+            const thead = document.createElement('thead');
+            const headerRow = document.createElement('tr');
+            
+            if (planilla.datos.length > 0) {
+                const headers = Object.keys(planilla.datos[0]);
+                headers.forEach(header => {
+                    const th = document.createElement('th');
+                    th.textContent = header;
+                    th.style.padding = '10px';
+                    th.style.textAlign = 'left';
+                    th.style.borderBottom = '1px solid #ddd';
+                    headerRow.appendChild(th);
+                });
+            }
+            
+            thead.appendChild(headerRow);
+            table.appendChild(thead);
+            
+            // Crear cuerpo de la tabla
+            const tbody = document.createElement('tbody');
+            
+            planilla.datos.forEach(row => {
+                const tr = document.createElement('tr');
+                
+                Object.values(row).forEach(value => {
+                    const td = document.createElement('td');
+                    td.textContent = value;
+                    td.style.padding = '10px';
+                    td.style.borderBottom = '1px solid #ddd';
+                    tr.appendChild(td);
+                });
+                
+                tbody.appendChild(tr);
+            });
+            
+            table.appendChild(tbody);
+            modalContent.appendChild(table);
+            
+            modal.appendChild(modalContent);
+            document.body.appendChild(modal);
+        }
+        
+        // Eliminar una planilla
+        function eliminarPlanilla(planillaId) {
+            if (confirm('¿Estás seguro que deseas eliminar esta planilla? Esta acción no se puede deshacer.')) {
+                planillas = planillas.filter(p => p.id !== planillaId);
+                datos = datos.filter(d => d.planillaId !== planillaId);
+                
+                cargarPlanillasUsuario();
+                cargarDatosTabla();
+                guardarDatos();
+            }
         }
 
         function editarRegistro(id) {
@@ -406,18 +799,34 @@
         }
 
         function exportarDatos() {
-            // En una implementación real, esto crearía un archivo Excel
-            alert('Exportando datos a Excel...');
+            // Crear un workbook de Excel
+            const wb = XLSX.utils.book_new();
             
-            // Aquí se podría usar librerías como SheetJS para la exportación real
-            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(datos));
-            const downloadAnchorNode = document.createElement('a');
-            downloadAnchorNode.setAttribute("href", dataStr);
-            downloadAnchorNode.setAttribute("download", "datos_exportados.json");
-            document.body.appendChild(downloadAnchorNode);
-            downloadAnchorNode.click();
-            downloadAnchorNode.remove();
+            // Convertir datos a worksheet
+            const ws = XLSX.utils.json_to_sheet(datos);
+            
+            // Agregar la hoja al workbook
+            XLSX.utils.book_append_sheet(wb, ws, "Datos Consolidados");
+            
+            // Si hay planillas individuales, agregamos cada una como una hoja
+            planillas.forEach(planilla => {
+                if (planilla.datos && planilla.datos.length > 0) {
+                    const wsIndividual = XLSX.utils.json_to_sheet(planilla.datos);
+                    XLSX.utils.book_append_sheet(wb, wsIndividual, planilla.nombre.slice(0, 30)); // Excel limita nombres de hojas
+                }
+            });
+            
+            // Crear archivo y descargarlo
+            XLSX.writeFile(wb, "sistema_gestion_datos.xlsx");
         }
+        
+        // Backup automático cada 5 minutos
+        setInterval(guardarDatos, 5 * 60 * 1000);
+        
+        // Antes de cerrar la ventana, intentar guardar los datos
+        window.addEventListener('beforeunload', function(e) {
+            guardarDatos();
+        });
     </script>
 </body>
 </html>
