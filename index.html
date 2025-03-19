@@ -4,7 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sistema de Gestión de Datos</title>
-    <!-- Incluimos SheetJS para manejo de Excel -->
+    <!-- Google Sheets y Drive API -->
+    <script src="https://apis.google.com/js/api.js"></script>
+    <!-- SheetJS para manejo de Excel -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
         body {
@@ -135,9 +137,44 @@
             background-color: #ffebee;
             color: #d32f2f;
         }
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 2s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
+    <!-- Configuración Inicial -->
+    <div class="login-container" id="configForm" style="display: none;">
+        <header>
+            <h2>Configuración Inicial</h2>
+        </header>
+        <p>Para comenzar, necesitas conectar tu hoja de Google Sheets:</p>
+        <div class="form-group">
+            <label for="spreadsheetId">ID de la Hoja de Google Sheets:</label>
+            <input type="text" id="spreadsheetId" placeholder="ID de tu hoja (de la URL)">
+        </div>
+        <div class="form-group">
+            <label for="apiKey">Clave de API de Google:</label>
+            <input type="text" id="apiKey" placeholder="Tu clave de API de Google">
+        </div>
+        <button onclick="guardarConfiguracion()">Guardar Configuración</button>
+    </div>
+
     <!-- Contenedor de Login -->
     <div class="login-container" id="loginForm">
         <header>
@@ -152,6 +189,13 @@
             <input type="password" id="password" placeholder="Ingrese su contraseña">
         </div>
         <button onclick="login()">Ingresar</button>
+        <div id="loginStatus" class="status-message" style="display: none;"></div>
+    </div>
+
+    <!-- Indicador de carga -->
+    <div class="loading" id="loadingIndicator">
+        <div class="loading-spinner"></div>
+        <p>Cargando datos...</p>
     </div>
 
     <!-- Dashboard Principal -->
@@ -284,68 +328,233 @@
     </div>
 
     <script>
-        // Datos iniciales (se cargarán desde localStorage si existen)
-        let usuarios = [
-            { username: 'admin', password: 'admin123', tipo: 'admin' },
-            { username: 'usuario1', password: 'user123', tipo: 'usuario' },
-            { username: 'usuario2', password: 'user456', tipo: 'usuario' }
-        ];
-
-        let datos = [
-            { id: 1, fecha: '2025-03-10', descripcion: 'Informe de ventas', responsable: 'usuario1', estado: 'completado' },
-            { id: 2, fecha: '2025-03-12', descripcion: 'Actualización de inventario', responsable: 'usuario2', estado: 'pendiente' },
-            { id: 3, fecha: '2025-03-14', descripcion: 'Revisión de presupuesto', responsable: 'admin', estado: 'en_proceso' }
-        ];
-        
-        // Estructura para almacenar planillas individuales por usuario
+        // Variables globales
+        let usuarioActual = null;
+        let spreadsheetId = '';
+        let apiKey = '';
+        let gapiIniciado = false;
+        let datos = [];
+        let usuarios = [];
         let planillas = [];
 
-        let usuarioActual = null;
-        
-        // Cargar datos desde localStorage al iniciar
-        function cargarDatosLocales() {
-            const usuariosGuardados = localStorage.getItem('usuarios');
-            const datosGuardados = localStorage.getItem('datos');
-            const planillasGuardadas = localStorage.getItem('planillas');
+        // Al cargar la página
+        window.onload = function() {
+            // Verificar si tenemos configuración guardada
+            const configGuardada = localStorage.getItem('sheetsConfig');
+            if (configGuardada) {
+                const config = JSON.parse(configGuardada);
+                spreadsheetId = config.spreadsheetId;
+                apiKey = config.apiKey;
+                
+                // Iniciar GAPI
+                iniciarGAPI();
+            } else {
+                // Mostrar formulario de configuración
+                document.getElementById('loginForm').style.display = 'none';
+                document.getElementById('configForm').style.display = 'block';
+            }
+        };
+
+        // Guardar configuración inicial
+        function guardarConfiguracion() {
+            spreadsheetId = document.getElementById('spreadsheetId').value.trim();
+            apiKey = document.getElementById('apiKey').value.trim();
             
-            if (usuariosGuardados) {
-                usuarios = JSON.parse(usuariosGuardados);
+            if (!spreadsheetId || !apiKey) {
+                alert('Por favor complete todos los campos');
+                return;
             }
             
-            if (datosGuardados) {
-                datos = JSON.parse(datosGuardados);
-            }
+            // Guardar en localStorage
+            localStorage.setItem('sheetsConfig', JSON.stringify({
+                spreadsheetId: spreadsheetId,
+                apiKey: apiKey
+            }));
             
-            if (planillasGuardadas) {
-                planillas = JSON.parse(planillasGuardadas);
-            }
-        }
-        
-        // Guardar datos en localStorage
-        function guardarDatos() {
-            localStorage.setItem('usuarios', JSON.stringify(usuarios));
-            localStorage.setItem('datos', JSON.stringify(datos));
-            localStorage.setItem('planillas', JSON.stringify(planillas));
+            // Ocultar formulario de configuración y mostrar login
+            document.getElementById('configForm').style.display = 'none';
+            document.getElementById('loginForm').style.display = 'block';
             
-            // Mostrar mensaje de guardado
-            const statusElement = document.createElement('div');
-            statusElement.className = 'status-message';
-            statusElement.textContent = 'Datos guardados correctamente ' + new Date().toLocaleTimeString();
-            document.body.appendChild(statusElement);
-            
-            setTimeout(() => {
-                statusElement.remove();
-            }, 3000);
+            // Iniciar GAPI
+            iniciarGAPI();
         }
 
-        // Inicio de sesión
-        function login() {
+        // Iniciar Google API
+        function iniciarGAPI() {
+            gapi.load('client', async () => {
+                try {
+                    await gapi.client.init({
+                        apiKey: apiKey,
+                        discoveryDocs: [
+                            'https://sheets.googleapis.com/$discovery/rest?version=v4'
+                        ]
+                    });
+                    
+                    console.log('Google API inicializada correctamente');
+                    gapiIniciado = true;
+                    
+                    // Verificar si la hoja existe y tiene la estructura correcta
+                    verificarHoja();
+                } catch (error) {
+                    console.error('Error al inicializar Google API:', error);
+                    mostrarMensajeLogin('Error de conexión con Google API. Verifique su clave de API.', true);
+                }
+            });
+        }
+
+        // Verificar que la hoja existe y tiene la estructura correcta
+        async function verificarHoja() {
+            try {
+                mostrarCargando(true);
+                
+                // Intentar cargar los datos de la hoja
+                const response = await gapi.client.sheets.spreadsheets.get({
+                    spreadsheetId: spreadsheetId
+                });
+                
+                const hojas = response.result.sheets;
+                const nombresHojas = hojas.map(hoja => hoja.properties.title);
+                
+                // Verificar si existen las hojas necesarias
+                const hojasNecesarias = ['Datos', 'Usuarios', 'Planillas', 'Config'];
+                const faltantes = hojasNecesarias.filter(h => !nombresHojas.includes(h));
+                
+                if (faltantes.length > 0) {
+                    // Crear las hojas que faltan
+                    await crearHojasFaltantes(faltantes);
+                }
+                
+                // Cargar datos de usuarios para el login
+                await cargarUsuarios();
+                
+                mostrarCargando(false);
+            } catch (error) {
+                console.error('Error al verificar la hoja:', error);
+                mostrarMensajeLogin('Error al acceder a la hoja de cálculo. Verifique el ID de la hoja.', true);
+                mostrarCargando(false);
+            }
+        }
+
+        // Crear hojas faltantes
+        async function crearHojasFaltantes(hojasFaltantes) {
+            try {
+                for (const hoja of hojasFaltantes) {
+                    // Añadir una nueva hoja
+                    await gapi.client.sheets.spreadsheets.batchUpdate({
+                        spreadsheetId: spreadsheetId,
+                        resource: {
+                            requests: [{
+                                addSheet: {
+                                    properties: {
+                                        title: hoja
+                                    }
+                                }
+                            }]
+                        }
+                    });
+                    
+                    // Añadir encabezados según la hoja
+                    let encabezados = [];
+                    switch (hoja) {
+                        case 'Datos':
+                            encabezados = ['ID', 'Fecha', 'Descripción', 'Responsable', 'Estado', 'PlanillaID'];
+                            break;
+                        case 'Usuarios':
+                            encabezados = ['Username', 'Password', 'Tipo'];
+                            // Añadir usuario admin por defecto
+                            await gapi.client.sheets.spreadsheets.values.append({
+                                spreadsheetId: spreadsheetId,
+                                range: 'Usuarios!A2',
+                                valueInputOption: 'USER_ENTERED',
+                                resource: {
+                                    values: [['admin', 'admin123', 'admin']]
+                                }
+                            });
+                            break;
+                        case 'Planillas':
+                            encabezados = ['ID', 'Nombre', 'Usuario', 'Fecha', 'HojaID'];
+                            break;
+                        case 'Config':
+                            encabezados = ['Clave', 'Valor'];
+                            break;
+                    }
+                    
+                    // Añadir los encabezados
+                    if (encabezados.length > 0) {
+                        await gapi.client.sheets.spreadsheets.values.update({
+                            spreadsheetId: spreadsheetId,
+                            range: `${hoja}!A1`,
+                            valueInputOption: 'USER_ENTERED',
+                            resource: {
+                                values: [encabezados]
+                            }
+                        });
+                    }
+                }
+                
+                console.log('Hojas creadas correctamente');
+            } catch (error) {
+                console.error('Error al crear hojas:', error);
+                mostrarMensajeLogin('Error al configurar las hojas de cálculo.', true);
+            }
+        }
+
+        // Cargar usuarios desde la hoja
+        async function cargarUsuarios() {
+            try {
+                const response = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: spreadsheetId,
+                    range: 'Usuarios!A:C'
+                });
+                
+                const rows = response.result.values || [];
+                
+                // Verificar si hay datos (excluyendo encabezados)
+                if (rows.length <= 1) {
+                    // No hay usuarios, añadir admin por defecto
+                    await gapi.client.sheets.spreadsheets.values.append({
+                        spreadsheetId: spreadsheetId,
+                        range: 'Usuarios!A2',
+                        valueInputOption: 'USER_ENTERED',
+                        resource: {
+                            values: [['admin', 'admin123', 'admin']]
+                        }
+                    });
+                    
+                    usuarios = [{ username: 'admin', password: 'admin123', tipo: 'admin' }];
+                } else {
+                    // Convertir filas a objetos (saltar encabezados)
+                    usuarios = [];
+                    for (let i = 1; i < rows.length; i++) {
+                        if (rows[i].length >= 3) {
+                            usuarios.push({
+                                username: rows[i][0],
+                                password: rows[i][1],
+                                tipo: rows[i][2]
+                            });
+                        }
+                    }
+                }
+                
+                console.log(`${usuarios.length} usuarios cargados`);
+            } catch (error) {
+                console.error('Error al cargar usuarios:', error);
+                mostrarMensajeLogin('Error al cargar datos de usuarios.', true);
+            }
+        }
+
+        // Función para iniciar sesión
+        async function login() {
             const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
             
-            // Cargar datos almacenados primero
-            cargarDatosLocales();
+            if (!gapiIniciado) {
+                mostrarMensajeLogin('Esperando conexión con Google API...', false);
+                setTimeout(login, 1000);
+                return;
+            }
             
+            // Verificar credenciales
             const usuario = usuarios.find(u => u.username === username && u.password === password);
             
             if (usuario) {
@@ -362,47 +571,107 @@
                     document.getElementById('adminPanel').style.display = 'none';
                 }
                 
+                // Cargar datos
+                await Promise.all([
+                    cargarDatos(),
+                    cargarPlanillas()
+                ]);
+                
                 cargarDatosTabla();
                 cargarPlanillasUsuario();
-                
-                // Configurar guardado automático cada 5 minutos
-                setInterval(guardarDatos, 5 * 60 * 1000);
             } else {
-                alert('Usuario o contraseña incorrectos');
+                mostrarMensajeLogin('Usuario o contraseña incorrectos', true);
             }
         }
 
-        function logout() {
-            // Guardar datos antes de cerrar sesión
-            guardarDatos();
+        // Mostrar mensaje en el formulario de login
+        function mostrarMensajeLogin(mensaje, esError) {
+            const statusElement = document.getElementById('loginStatus');
+            statusElement.textContent = mensaje;
+            statusElement.style.display = 'block';
             
-            usuarioActual = null;
-            document.getElementById('loginForm').style.display = 'block';
-            document.getElementById('dashboard').style.display = 'none';
-            document.getElementById('username').value = '';
-            document.getElementById('password').value = '';
-        }
-        
-        // Función para cambiar entre pestañas
-        function cambiarTab(tabId) {
-            // Ocultar todas las pestañas
-            document.querySelectorAll('.tab-content').forEach(tab => {
-                tab.classList.remove('active');
-            });
+            if (esError) {
+                statusElement.classList.add('error');
+            } else {
+                statusElement.classList.remove('error');
+            }
             
-            // Desactivar todos los botones de pestañas
-            document.querySelectorAll('.tab').forEach(tab => {
-                tab.classList.remove('active');
-            });
-            
-            // Activar la pestaña seleccionada
-            document.getElementById(tabId).classList.add('active');
-            
-            // Activar el botón de la pestaña
-            const index = ['datosGenerales', 'misPlanillas', 'importarDatos'].indexOf(tabId);
-            document.querySelectorAll('.tab')[index].classList.add('active');
+            setTimeout(() => {
+                statusElement.style.display = 'none';
+            }, 5000);
         }
 
+        // Mostrar/ocultar indicador de carga
+        function mostrarCargando(mostrar) {
+            document.getElementById('loadingIndicator').style.display = mostrar ? 'block' : 'none';
+        }
+
+        // Cargar datos desde la hoja
+        async function cargarDatos() {
+            try {
+                mostrarCargando(true);
+                
+                const response = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: spreadsheetId,
+                    range: 'Datos!A:F'
+                });
+                
+                const rows = response.result.values || [];
+                
+                // Convertir filas a objetos (saltar encabezados)
+                datos = [];
+                for (let i = 1; i < rows.length; i++) {
+                    if (rows[i].length >= 5) {
+                        datos.push({
+                            id: rows[i][0],
+                            fecha: rows[i][1],
+                            descripcion: rows[i][2],
+                            responsable: rows[i][3],
+                            estado: rows[i][4],
+                            planillaId: rows[i][5] || ''
+                        });
+                    }
+                }
+                
+                console.log(`${datos.length} registros cargados`);
+                mostrarCargando(false);
+            } catch (error) {
+                console.error('Error al cargar datos:', error);
+                mostrarCargando(false);
+            }
+        }
+
+        // Cargar planillas desde la hoja
+        async function cargarPlanillas() {
+            try {
+                const response = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: spreadsheetId,
+                    range: 'Planillas!A:E'
+                });
+                
+                const rows = response.result.values || [];
+                
+                // Convertir filas a objetos (saltar encabezados)
+                planillas = [];
+                for (let i = 1; i < rows.length; i++) {
+                    if (rows[i].length >= 5) {
+                        planillas.push({
+                            id: rows[i][0],
+                            nombre: rows[i][1],
+                            usuario: rows[i][2],
+                            fecha: rows[i][3],
+                            hojaId: rows[i][4]
+                        });
+                    }
+                }
+                
+                console.log(`${planillas.length} planillas cargadas`);
+            } catch (error) {
+                console.error('Error al cargar planillas:', error);
+            }
+        }
+
+        // Cargar datos en la tabla
         function cargarDatosTabla(filtro = 'todos') {
             const tbody = document.getElementById('datosCuerpo');
             tbody.innerHTML = '';
@@ -424,8 +693,8 @@
                     <td>${dato.responsable}</td>
                     <td>${dato.estado}</td>
                     <td>
-                        <button onclick="editarRegistro(${dato.id})">Editar</button>
-                        ${usuarioActual.tipo === 'admin' ? `<button onclick="eliminarRegistro(${dato.id})">Eliminar</button>` : ''}
+                        <button onclick="editarRegistro('${dato.id}')">Editar</button>
+                        ${usuarioActual.tipo === 'admin' ? `<button onclick="eliminarRegistro('${dato.id}')">Eliminar</button>` : ''}
                     </td>
                 `;
                 
@@ -433,12 +702,34 @@
             });
         }
 
+        // Filtrar datos
         function filtrarDatos() {
             const filtro = document.getElementById('filtro').value;
             cargarDatosTabla(filtro);
         }
 
-        function agregarRegistro() {
+        // Cambiar entre pestañas
+        function cambiarTab(tabId) {
+            // Ocultar todas las pestañas
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Desactivar todos los botones de pestañas
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Activar la pestaña seleccionada
+            document.getElementById(tabId).classList.add('active');
+            
+            // Activar el botón de la pestaña
+            const index = ['datosGenerales', 'misPlanillas', 'importarDatos'].indexOf(tabId);
+            document.querySelectorAll('.tab')[index].classList.add('active');
+        }
+
+        // Agregar nuevo registro
+        async function agregarRegistro() {
             const descripcion = document.getElementById('descripcion').value;
             const estado = document.getElementById('estado').value;
             
@@ -447,29 +738,167 @@
                 return;
             }
             
-            const nuevoId = datos.length > 0 ? Math.max(...datos.map(d => d.id)) + 1 : 1;
-            const fechaActual = new Date().toISOString().split('T')[0];
+            mostrarCargando(true);
             
-            datos.push({
-                id: nuevoId,
-                fecha: fechaActual,
-                descripcion: descripcion,
-                responsable: usuarioActual.username,
-                estado: estado
-            });
-            
-            document.getElementById('descripcion').value = '';
-            cargarDatosTabla();
-            
-            // Guardar datos automáticamente
-            guardarDatos();
+            try {
+                const nuevoId = datos.length > 0 ? Math.max(...datos.map(d => parseInt(d.id))) + 1 : 1;
+                const fechaActual = new Date().toISOString().split('T')[0];
+                
+                // Guardar en la hoja
+                await gapi.client.sheets.spreadsheets.values.append({
+                    spreadsheetId: spreadsheetId,
+                    range: 'Datos!A:F',
+                    valueInputOption: 'USER_ENTERED',
+                    resource: {
+                        values: [[
+                            nuevoId.toString(), 
+                            fechaActual, 
+                            descripcion, 
+                            usuarioActual.username, 
+                            estado,
+                            ''
+                        ]]
+                    }
+                });
+                
+                // Actualizar datos locales
+                datos.push({
+                    id: nuevoId.toString(),
+                    fecha: fechaActual,
+                    descripcion: descripcion,
+                    responsable: usuarioActual.username,
+                    estado: estado,
+                    planillaId: ''
+                });
+                
+                document.getElementById('descripcion').value = '';
+                cargarDatosTabla();
+                mostrarCargando(false);
+            } catch (error) {
+                console.error('Error al agregar registro:', error);
+                alert('Error al guardar el registro. Intente nuevamente.');
+                mostrarCargando(false);
+            }
         }
-        
-        // Función para importar datos desde Excel
-        function importarExcel() {
+
+        // Editar un registro
+        async function editarRegistro(id) {
+            const registro = datos.find(d => d.id === id);
+            if (!registro) return;
+            
+            const nuevaDescripcion = prompt('Editar descripción:', registro.descripcion);
+            const nuevoEstado = prompt('Editar estado (pendiente, en_proceso, completado):', registro.estado);
+            
+            if (nuevaDescripcion !== null && nuevoEstado !== null) {
+                mostrarCargando(true);
+                
+                try {
+                    // Encontrar la fila del registro
+                    const response = await gapi.client.sheets.spreadsheets.values.get({
+                        spreadsheetId: spreadsheetId,
+                        range: 'Datos!A:A'
+                    });
+                    
+                    const rows = response.result.values || [];
+                    let filaIndex = -1;
+                    
+                    for (let i = 1; i < rows.length; i++) {
+                        if (rows[i][0] === id) {
+                            filaIndex = i + 1; // +1 porque las filas en Sheets empiezan en 1, no en 0
+                            break;
+                        }
+                    }
+                    
+                    if (filaIndex > 0) {
+                        // Actualizar en la hoja
+                        await gapi.client.sheets.spreadsheets.values.update({
+                            spreadsheetId: spreadsheetId,
+                            range: `Datos!C${filaIndex}:E${filaIndex}`,
+                            valueInputOption: 'USER_ENTERED',
+                            resource: {
+                                values: [[nuevaDescripcion, registro.responsable, nuevoEstado]]
+                            }
+                        });
+                        
+                        // Actualizar datos locales
+                        registro.descripcion = nuevaDescripcion;
+                        registro.estado = nuevoEstado;
+                        
+                        cargarDatosTabla();
+                    } else {
+                        alert('No se encontró el registro para editar.');
+                    }
+                    
+                    mostrarCargando(false);
+                } catch (error) {
+                    console.error('Error al editar registro:', error);
+                    alert('Error al actualizar el registro. Intente nuevamente.');
+                    mostrarCargando(false);
+                }
+            }
+        }
+
+        // Eliminar un registro
+        async function eliminarRegistro(id) {
+            if (confirm('¿Está seguro de eliminar este registro?')) {
+                mostrarCargando(true);
+                
+                try {
+                    // Encontrar la fila del registro
+                    const response = await gapi.client.sheets.spreadsheets.values.get({
+                        spreadsheetId: spreadsheetId,
+                        range: 'Datos!A:A'
+                    });
+                    
+                    const rows = response.result.values || [];
+                    let filaIndex = -1;
+                    
+                    for (let i = 1; i < rows.length; i++) {
+                        if (rows[i][0] === id) {
+                            filaIndex = i + 1; // +1
+                            break;
+                        }
+                    }
+                    
+                    if (filaIndex > 0) {
+                        // Eliminar la fila
+                        await gapi.client.sheets.spreadsheets.batchUpdate({
+                            spreadsheetId: spreadsheetId,
+                            resource: {
+                                requests: [{
+                                    deleteDimension: {
+                                        range: {
+                                            sheetId: 0, // Asumiendo que Datos es la primera hoja
+                                            dimension: 'ROWS',
+                                            startIndex: filaIndex - 1, // Ajustar al índice base 0
+                                            endIndex: filaIndex // No inclusivo
+                                        }
+                                    }
+                                }]
+                            }
+                        });
+                        
+                        // Actualizar datos locales
+                        datos = datos.filter(d => d.id !== id);
+                        
+                        cargarDatosTabla();
+                    } else {
+                        alert('No se encontró el registro para eliminar.');
+                    }
+                    
+                    mostrarCargando(false);
+                } catch (error) {
+                    console.error('Error al eliminar registro:', error);
+                    alert('Error al eliminar el registro. Intente nuevamente.');
+                    mostrarCargando(false);
+                }
+            }
+        }
+
+        // Importar datos desde Excel
+        async function importarExcel() {
             const fileInput = document.getElementById('excelFile');
             const nombrePlanilla = document.getElementById('planillaNombre').value;
-            const statusElement = document.getElementById('importStatus');
             
             if (!fileInput.files.length) {
                 mostrarEstado('Por favor selecciona un archivo Excel', true);
@@ -481,10 +910,12 @@
                 return;
             }
             
+            mostrarCargando(true);
+            
             const file = fileInput.files[0];
             const reader = new FileReader();
             
-            reader.onload = function(e) {
+            reader.onload = async function(e) {
                 try {
                     const data = e.target.result;
                     const workbook = XLSX.read(data, { type: 'binary' });
@@ -492,38 +923,121 @@
                     const worksheet = workbook.Sheets[sheetName];
                     const json = XLSX.utils.sheet_to_json(worksheet);
                     
-                    // Guardar la planilla en el sistema
-                    const nuevaPlanilla = {
-                        id: Date.now(),
+                    if (json.length === 0) {
+                        mostrarEstado('El archivo no contiene datos válidos', true);
+                        mostrarCargando(false);
+                        return;
+                    }
+                    
+                    // Crear una nueva hoja en Google Sheets para esta planilla
+                    const hojaId = Date.now().toString();
+                    const nombreHoja = 'Planilla_' + hojaId;
+                    
+                    // Añadir la hoja al libro
+                    await gapi.client.sheets.spreadsheets.batchUpdate({
+                        spreadsheetId: spreadsheetId,
+                        resource: {
+                            requests: [{
+                                addSheet: {
+                                    properties: {
+                                        title: nombreHoja
+                                    }
+                                }
+                            }]
+                        }
+                    });
+                    
+                    // Obtener las claves (encabezados) del primer objeto
+                    const headers = Object.keys(json[0]);
+                    
+                    // Crear filas de datos incluyendo encabezados
+                    const rows = [headers];
+                    json.forEach(item => {
+                        const row = headers.map(header => item[header] || '');
+                        rows.push(row);
+                    });
+                    
+                    // Guardar datos en la nueva hoja
+                    await gapi.client.sheets.spreadsheets.values.update({
+                        spreadsheetId: spreadsheetId,
+                        range: `${nombreHoja}!A1`,
+                        valueInputOption: 'USER_ENTERED',
+                        resource: {
+                            values: rows
+                        }
+                    });
+                    
+                    // Registrar la planilla
+                    const nuevaPlanillaId = Date.now().toString();
+                    const fechaActual = new Date().toISOString().split('T')[0];
+                    
+                    await gapi.client.sheets.spreadsheets.values.append({
+                        spreadsheetId: spreadsheetId,
+                        range: 'Planillas!A:E',
+                        valueInputOption: 'USER_ENTERED',
+                        resource: {
+                            values: [[
+                                nuevaPlanillaId,
+                                nombrePlanilla,
+                                usuarioActual.username,
+                                fechaActual,
+                                nombreHoja
+                            ]]
+                        }
+                    });
+                    
+                    // Añadir la planilla a los datos locales
+                    planillas.push({
+                        id: nuevaPlanillaId,
                         nombre: nombrePlanilla,
                         usuario: usuarioActual.username,
-                        fecha: new Date().toISOString().split('T')[0],
-                        datos: json
-                    };
-                    
-                    planillas.push(nuevaPlanilla);
+                        fecha: fechaActual,
+                        hojaId: nombreHoja
+                    });
                     
                     // Convertir datos de la planilla al formato de la aplicación
-                    json.forEach(item => {
+                    const nuevosDatos = [];
+                    json.forEach((item, index) => {
+                        const nuevoId = datos.length > 0 ? Math.max(...datos.map(d => parseInt(d.id))) + index + 1 : index + 1;
+                        
                         // Intentamos mapear las columnas de Excel a nuestro formato
-                        const nuevoRegistro = {
-                            id: datos.length > 0 ? Math.max(...datos.map(d => d.id)) + 1 : 1,
-                            fecha: new Date().toISOString().split('T')[0],
-                            descripcion: item.Descripcion || item.descripcion || item.Concepto || item.concepto || Object.values(item)[0],
+                        const nuevoRegistro = [
+                            nuevoId.toString(),
+                            fechaActual,
+                            item.Descripcion || item.descripcion || item.Concepto || item.concepto || Object.values(item)[0] || 'Registro importado',
+                            usuarioActual.username,
+                            'pendiente',
+                            nuevaPlanillaId
+                        ];
+                        
+                        nuevosDatos.push(nuevoRegistro);
+                        
+                        // Añadir al array local
+                        datos.push({
+                            id: nuevoId.toString(),
+                            fecha: fechaActual,
+                            descripcion: nuevoRegistro[2],
                             responsable: usuarioActual.username,
                             estado: 'pendiente',
-                            planillaId: nuevaPlanilla.id
-                        };
-                        
-                        datos.push(nuevoRegistro);
+                            planillaId: nuevaPlanillaId
+                        });
                     });
+                    
+                    // Guardar en la hoja Datos
+                    if (nuevosDatos.length > 0) {
+                        await gapi.client.sheets.spreadsheets.values.append({
+                            spreadsheetId: spreadsheetId,
+                            range: 'Datos!A:F',
+                            valueInputOption: 'USER_ENTERED',
+                            resource: {
+                                values: nuevosDatos
+                            }
+                        });
+                    }
                     
                     // Actualizar vistas
                     cargarDatosTabla();
                     cargarPlanillasUsuario();
-                    
-                    // Guardar datos
-                    guardarDatos();
                     
                     mostrarEstado(`Planilla "${nombrePlanilla}" importada correctamente con ${json.length} registros`, false);
                     
@@ -531,19 +1045,22 @@
                     fileInput.value = '';
                     document.getElementById('planillaNombre').value = '';
                     
+                    mostrarCargando(false);
                 } catch (error) {
                     console.error("Error al procesar el archivo:", error);
                     mostrarEstado("Error al procesar el archivo: " + error.message, true);
+                    mostrarCargando(false);
                 }
             };
             
             reader.onerror = function() {
                 mostrarEstado("Error al leer el archivo", true);
+                mostrarCargando(false);
             };
             
             reader.readAsBinaryString(file);
         }
-        
+
         // Mostrar mensaje de estado
         function mostrarEstado(mensaje, esError) {
             const statusElement = document.getElementById('importStatus');
@@ -560,13 +1077,16 @@
                 statusElement.style.display = 'none';
             }, 5000);
         }
-        
+
         // Cargar planillas del usuario actual
         function cargarPlanillasUsuario() {
             const planillasContainer = document.getElementById('misPlanillasLista');
             planillasContainer.innerHTML = '';
             
-            const misPlanillas = planillas.filter(p => p.usuario === usuarioActual.username);
+            // Filtrar planillas del usuario o mostrar todas si es admin
+            const misPlanillas = usuarioActual.tipo === 'admin' 
+                ? planillas 
+                : planillas.filter(p => p.usuario === usuarioActual.username);
             
             if (misPlanillas.length === 0) {
                 planillasContainer.innerHTML = '<p>No tienes planillas importadas. Ve a la pestaña "Importar Datos" para agregar tu primera planilla.</p>';
@@ -581,14 +1101,14 @@
                 planillaHeader.textContent = planilla.nombre;
                 
                 const planillaInfo = document.createElement('p');
-                planillaInfo.textContent = `Importada el ${planilla.fecha} • ${planilla.datos.length} registros`;
+                planillaInfo.textContent = `Importada el ${planilla.fecha} • Usuario: ${planilla.usuario}`;
                 
                 const planillaAcciones = document.createElement('div');
                 planillaAcciones.style.marginTop = '10px';
                 
                 const verButton = document.createElement('button');
                 verButton.textContent = 'Ver Datos';
-                verButton.onclick = () => mostrarDetallePlanilla(planilla);
+                verButton.onclick = () => verPlanilla(planilla.hojaId);
                 
                 const eliminarButton = document.createElement('button');
                 eliminarButton.textContent = 'Eliminar';
@@ -606,61 +1126,76 @@
                 planillasContainer.appendChild(planillaDiv);
             });
         }
-        
-        // Mostrar detalle de una planilla
-        function mostrarDetallePlanilla(planilla) {
-            // Crear un modal o div temporal para mostrar los datos
-            const modal = document.createElement('div');
-            modal.style.position = 'fixed';
-            modal.style.left = '0';
-            modal.style.top = '0';
-            modal.style.width = '100%';
-            modal.style.height = '100%';
-            modal.style.backgroundColor = 'rgba(0,0,0,0.7)';
-            modal.style.zIndex = '1000';
-            modal.style.display = 'flex';
-            modal.style.justifyContent = 'center';
-            modal.style.alignItems = 'center';
+
+        // Ver una planilla
+        async function verPlanilla(hojaId) {
+            mostrarCargando(true);
             
-            const modalContent = document.createElement('div');
-            modalContent.style.backgroundColor = 'white';
-            modalContent.style.padding = '20px';
-            modalContent.style.borderRadius = '8px';
-            modalContent.style.width = '80%';
-            modalContent.style.maxHeight = '80%';
-            modalContent.style.overflow = 'auto';
-            
-            // Agregar botón para cerrar
-            const closeBtn = document.createElement('button');
-            closeBtn.textContent = 'X';
-            closeBtn.style.float = 'right';
-            closeBtn.style.backgroundColor = '#f44336';
-            closeBtn.style.color = 'white';
-            closeBtn.style.border = 'none';
-            closeBtn.style.borderRadius = '4px';
-            closeBtn.style.padding = '5px 10px';
-            closeBtn.onclick = () => document.body.removeChild(modal);
-            
-            modalContent.appendChild(closeBtn);
-            
-            // Agregar título
-            const title = document.createElement('h2');
-            title.textContent = `Planilla: ${planilla.nombre}`;
-            modalContent.appendChild(title);
-            
-            // Crear tabla para mostrar datos
-            const table = document.createElement('table');
-            table.style.width = '100%';
-            table.style.borderCollapse = 'collapse';
-            table.style.marginTop = '15px';
-            
-            // Crear encabezados
-            const thead = document.createElement('thead');
-            const headerRow = document.createElement('tr');
-            
-            if (planilla.datos.length > 0) {
-                const headers = Object.keys(planilla.datos[0]);
-                headers.forEach(header => {
+            try {
+                // Obtener datos de la hoja
+                const response = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: spreadsheetId,
+                    range: `${hojaId}!A:Z`
+                });
+                
+                const rows = response.result.values || [];
+                
+                if (rows.length <= 1) {
+                    alert('Esta planilla no contiene datos');
+                    mostrarCargando(false);
+                    return;
+                }
+                
+                // Crear un modal
+                const modal = document.createElement('div');
+                modal.style.position = 'fixed';
+                modal.style.left = '0';
+                modal.style.top = '0';
+                modal.style.width = '100%';
+                modal.style.height = '100%';
+                modal.style.backgroundColor = 'rgba(0,0,0,0.7)';
+                modal.style.zIndex = '1000';
+                modal.style.display = 'flex';
+                modal.style.justifyContent = 'center';
+                modal.style.alignItems = 'center';
+                
+                const modalContent = document.createElement('div');
+                modalContent.style.backgroundColor = 'white';
+                modalContent.style.padding = '20px';
+                modalContent.style.borderRadius = '8px';
+                modalContent.style.width = '80%';
+                modalContent.style.maxHeight = '80%';
+                modalContent.style.overflow = 'auto';
+                
+                // Agregar botón para cerrar
+                const closeBtn = document.createElement('button');
+                closeBtn.textContent = 'X';
+                closeBtn.style.float = 'right';
+                closeBtn.style.backgroundColor = '#f44336';
+                closeBtn.style.color = 'white';
+                closeBtn.style.border = 'none';
+                closeBtn.style.borderRadius = '4px';
+                closeBtn.style.padding = '5px 10px';
+                closeBtn.onclick = () => document.body.removeChild(modal);
+                
+                modalContent.appendChild(closeBtn);
+                
+                // Agregar título
+                const title = document.createElement('h2');
+                title.textContent = `Datos de la planilla`;
+                modalContent.appendChild(title);
+                
+                // Crear tabla para mostrar datos
+                const table = document.createElement('table');
+                table.style.width = '100%';
+                table.style.borderCollapse = 'collapse';
+                table.style.marginTop = '15px';
+                
+                // Crear encabezados
+                const thead = document.createElement('thead');
+                const headerRow = document.createElement('tr');
+                
+                rows[0].forEach(header => {
                     const th = document.createElement('th');
                     th.textContent = header;
                     th.style.padding = '10px';
@@ -668,69 +1203,156 @@
                     th.style.borderBottom = '1px solid #ddd';
                     headerRow.appendChild(th);
                 });
+                
+                thead.appendChild(headerRow);
+                table.appendChild(thead);
+                
+                // Crear cuerpo de la tabla
+                const tbody = document.createElement('tbody');
+                
+                for (let i = 1; i < rows.length; i++) {
+                    const tr = document.createElement('tr');
+                    
+                    rows[i].forEach(value => {
+                        const td = document.createElement('td');
+                        td.textContent = value;
+                        td.style.padding = '10px';
+                        td.style.borderBottom = '1px solid #ddd';
+                        tr.appendChild(td);
+                    });
+                    
+                    tbody.appendChild(tr);
+                }
+                
+                table.appendChild(tbody);
+                modalContent.appendChild(table);
+                
+                modal.appendChild(modalContent);
+                document.body.appendChild(modal);
+                
+                mostrarCargando(false);
+            } catch (error) {
+                console.error('Error al ver planilla:', error);
+                alert('Error al cargar los datos de la planilla');
+                mostrarCargando(false);
             }
-            
-            thead.appendChild(headerRow);
-            table.appendChild(thead);
-            
-            // Crear cuerpo de la tabla
-            const tbody = document.createElement('tbody');
-            
-            planilla.datos.forEach(row => {
-                const tr = document.createElement('tr');
-                
-                Object.values(row).forEach(value => {
-                    const td = document.createElement('td');
-                    td.textContent = value;
-                    td.style.padding = '10px';
-                    td.style.borderBottom = '1px solid #ddd';
-                    tr.appendChild(td);
-                });
-                
-                tbody.appendChild(tr);
-            });
-            
-            table.appendChild(tbody);
-            modalContent.appendChild(table);
-            
-            modal.appendChild(modalContent);
-            document.body.appendChild(modal);
         }
-        
+
         // Eliminar una planilla
-        function eliminarPlanilla(planillaId) {
+        async function eliminarPlanilla(planillaId) {
             if (confirm('¿Estás seguro que deseas eliminar esta planilla? Esta acción no se puede deshacer.')) {
-                planillas = planillas.filter(p => p.id !== planillaId);
-                datos = datos.filter(d => d.planillaId !== planillaId);
+                mostrarCargando(true);
                 
-                cargarPlanillasUsuario();
-                cargarDatosTabla();
-                guardarDatos();
+                try {
+                    // Obtener la planilla
+                    const planilla = planillas.find(p => p.id === planillaId);
+                    if (!planilla) {
+                        alert('No se encontró la planilla');
+                        mostrarCargando(false);
+                        return;
+                    }
+                    
+                    // 1. Eliminar registros asociados a esta planilla
+                    const registrosParaEliminar = datos.filter(d => d.planillaId === planillaId);
+                    
+                    for (const registro of registrosParaEliminar) {
+                        await eliminarRegistro(registro.id);
+                    }
+                    
+                    // 2. Eliminar la hoja
+                    // Primero necesitamos obtener el ID interno de la hoja
+                    const responseSheets = await gapi.client.sheets.spreadsheets.get({
+                        spreadsheetId: spreadsheetId
+                    });
+                    
+                    const sheets = responseSheets.result.sheets;
+                    let sheetId = null;
+                    
+                    for (const sheet of sheets) {
+                        if (sheet.properties.title === planilla.hojaId) {
+                            sheetId = sheet.properties.sheetId;
+                            break;
+                        }
+                    }
+                    
+                    if (sheetId !== null) {
+                        await gapi.client.sheets.spreadsheets.batchUpdate({
+                            spreadsheetId: spreadsheetId,
+                            resource: {
+                                requests: [{
+                                    deleteSheet: {
+                                        sheetId: sheetId
+                                    }
+                                }]
+                            }
+                        });
+                    }
+                    
+                    // 3. Eliminar el registro de la planilla
+                    // Encontrar la fila de la planilla
+                    const response = await gapi.client.sheets.spreadsheets.values.get({
+                        spreadsheetId: spreadsheetId,
+                        range: 'Planillas!A:A'
+                    });
+                    
+                    const rows = response.result.values || [];
+                    let filaIndex = -1;
+                    
+                    for (let i = 1; i < rows.length; i++) {
+                        if (rows[i][0] === planillaId) {
+                            filaIndex = i + 1; // +1
+                            break;
+                        }
+                    }
+                    
+                    if (filaIndex > 0) {
+                        // Encontrar el ID de la hoja "Planillas"
+                        let planillasSheetId = null;
+                        for (const sheet of sheets) {
+                            if (sheet.properties.title === 'Planillas') {
+                                planillasSheetId = sheet.properties.sheetId;
+                                break;
+                            }
+                        }
+                        
+                        if (planillasSheetId !== null) {
+                            await gapi.client.sheets.spreadsheets.batchUpdate({
+                                spreadsheetId: spreadsheetId,
+                                resource: {
+                                    requests: [{
+                                        deleteDimension: {
+                                            range: {
+                                                sheetId: planillasSheetId,
+                                                dimension: 'ROWS',
+                                                startIndex: filaIndex - 1,
+                                                endIndex: filaIndex
+                                            }
+                                        }
+                                    }]
+                                }
+                            });
+                        }
+                    }
+                    
+                    // 4. Actualizar datos locales
+                    planillas = planillas.filter(p => p.id !== planillaId);
+                    datos = datos.filter(d => d.planillaId !== planillaId);
+                    
+                    cargarPlanillasUsuario();
+                    cargarDatosTabla();
+                    
+                    mostrarCargando(false);
+                    
+                    alert('Planilla eliminada correctamente');
+                } catch (error) {
+                    console.error('Error al eliminar planilla:', error);
+                    alert('Error al eliminar la planilla');
+                    mostrarCargando(false);
+                }
             }
         }
 
-        function editarRegistro(id) {
-            const registro = datos.find(d => d.id === id);
-            if (!registro) return;
-            
-            const nuevaDescripcion = prompt('Editar descripción:', registro.descripcion);
-            const nuevoEstado = prompt('Editar estado (pendiente, en_proceso, completado):', registro.estado);
-            
-            if (nuevaDescripcion !== null && nuevoEstado !== null) {
-                registro.descripcion = nuevaDescripcion;
-                registro.estado = nuevoEstado;
-                cargarDatosTabla();
-            }
-        }
-
-        function eliminarRegistro(id) {
-            if (confirm('¿Está seguro de eliminar este registro?')) {
-                datos = datos.filter(d => d.id !== id);
-                cargarDatosTabla();
-            }
-        }
-
-        // Funciones de administrador
+        // Cargar usuarios para el panel de administrador
         function cargarUsuariosTabla() {
             const tbody = document.getElementById('usuariosCuerpo');
             tbody.innerHTML = '';
@@ -751,7 +1373,8 @@
             });
         }
 
-        function agregarUsuario() {
+        // Agregar un nuevo usuario
+        async function agregarUsuario() {
             const nuevoUsuario = document.getElementById('nuevoUsuario').value;
             const nuevaContrasena = document.getElementById('nuevaContrasena').value;
             const tipoUsuario = document.getElementById('tipoUsuario').value;
@@ -766,67 +1389,216 @@
                 return;
             }
             
-            usuarios.push({
-                username: nuevoUsuario,
-                password: nuevaContrasena,
-                tipo: tipoUsuario
-            });
+            mostrarCargando(true);
             
-            document.getElementById('nuevoUsuario').value = '';
-            document.getElementById('nuevaContrasena').value = '';
-            cargarUsuariosTabla();
+            try {
+                // Guardar en la hoja
+                await gapi.client.sheets.spreadsheets.values.append({
+                    spreadsheetId: spreadsheetId,
+                    range: 'Usuarios!A:C',
+                    valueInputOption: 'USER_ENTERED',
+                    resource: {
+                        values: [[nuevoUsuario, nuevaContrasena, tipoUsuario]]
+                    }
+                });
+                
+                // Actualizar datos locales
+                usuarios.push({
+                    username: nuevoUsuario,
+                    password: nuevaContrasena,
+                    tipo: tipoUsuario
+                });
+                
+                document.getElementById('nuevoUsuario').value = '';
+                document.getElementById('nuevaContrasena').value = '';
+                
+                cargarUsuariosTabla();
+                mostrarCargando(false);
+                
+                alert('Usuario agregado correctamente');
+            } catch (error) {
+                console.error('Error al agregar usuario:', error);
+                alert('Error al agregar el usuario');
+                mostrarCargando(false);
+            }
         }
 
-        function cambiarTipoUsuario(username) {
+        // Cambiar tipo de usuario
+        async function cambiarTipoUsuario(username) {
             const usuario = usuarios.find(u => u.username === username);
             if (!usuario) return;
             
             const nuevoTipo = usuario.tipo === 'admin' ? 'usuario' : 'admin';
-            usuario.tipo = nuevoTipo;
-            cargarUsuariosTabla();
+            
+            mostrarCargando(true);
+            
+            try {
+                // Encontrar la fila del usuario
+                const response = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: spreadsheetId,
+                    range: 'Usuarios!A:A'
+                });
+                
+                const rows = response.result.values || [];
+                let filaIndex = -1;
+                
+                for (let i = 1; i < rows.length; i++) {
+                    if (rows[i][0] === username) {
+                        filaIndex = i + 1; // +1
+                        break;
+                    }
+                }
+                
+                if (filaIndex > 0) {
+                    // Actualizar en la hoja
+                    await gapi.client.sheets.spreadsheets.values.update({
+                        spreadsheetId: spreadsheetId,
+                        range: `Usuarios!C${filaIndex}`,
+                        valueInputOption: 'USER_ENTERED',
+                        resource: {
+                            values: [[nuevoTipo]]
+                        }
+                    });
+                    
+                    // Actualizar datos locales
+                    usuario.tipo = nuevoTipo;
+                    
+                    cargarUsuariosTabla();
+                    
+                    mostrarCargando(false);
+                    
+                    alert(`Usuario ${username} ahora es ${nuevoTipo}`);
+                } else {
+                    alert('No se encontró el usuario para cambiar su tipo');
+                    mostrarCargando(false);
+                }
+            } catch (error) {
+                console.error('Error al cambiar tipo de usuario:', error);
+                alert('Error al cambiar el tipo de usuario');
+                mostrarCargando(false);
+            }
         }
 
-        function eliminarUsuario(username) {
+        // Eliminar usuario
+        async function eliminarUsuario(username) {
             if (username === 'admin') {
                 alert('No se puede eliminar al usuario administrador principal');
                 return;
             }
             
             if (confirm('¿Está seguro de eliminar este usuario?')) {
-                usuarios = usuarios.filter(u => u.username !== username);
-                cargarUsuariosTabla();
+                mostrarCargando(true);
+                
+                try {
+                    // Encontrar la fila del usuario
+                    const response = await gapi.client.sheets.spreadsheets.values.get({
+                        spreadsheetId: spreadsheetId,
+                        range: 'Usuarios!A:A'
+                    });
+                    
+                    const rows = response.result.values || [];
+                    let filaIndex = -1;
+                    
+                    for (let i = 1; i < rows.length; i++) {
+                        if (rows[i][0] === username) {
+                            filaIndex = i + 1; // +1
+                            break;
+                        }
+                    }
+                    
+                    if (filaIndex > 0) {
+                        // Obtener el ID de la hoja "Usuarios"
+                        const responseSheets = await gapi.client.sheets.spreadsheets.get({
+                            spreadsheetId: spreadsheetId
+                        });
+                        
+                        const sheets = responseSheets.result.sheets;
+                        let usuariosSheetId = null;
+                        
+                        for (const sheet of sheets) {
+                            if (sheet.properties.title === 'Usuarios') {
+                                usuariosSheetId = sheet.properties.sheetId;
+                                break;
+                            }
+                        }
+                        
+                        if (usuariosSheetId !== null) {
+                            // Eliminar la fila
+                            await gapi.client.sheets.spreadsheets.batchUpdate({
+                                spreadsheetId: spreadsheetId,
+                                resource: {
+                                    requests: [{
+                                        deleteDimension: {
+                                            range: {
+                                                sheetId: usuariosSheetId,
+                                                dimension: 'ROWS',
+                                                startIndex: filaIndex - 1,
+                                                endIndex: filaIndex
+                                            }
+                                        }
+                                    }]
+                                }
+                            });
+                            
+                            // Actualizar datos locales
+                            usuarios = usuarios.filter(u => u.username !== username);
+                            
+                            cargarUsuariosTabla();
+                            
+                            mostrarCargando(false);
+                            
+                            alert(`Usuario ${username} eliminado correctamente`);
+                        } else {
+                            alert('No se pudo encontrar la hoja de usuarios');
+                            mostrarCargando(false);
+                        }
+                    } else {
+                        alert('No se encontró el usuario para eliminar');
+                        mostrarCargando(false);
+                    }
+                } catch (error) {
+                    console.error('Error al eliminar usuario:', error);
+                    alert('Error al eliminar el usuario');
+                    mostrarCargando(false);
+                }
             }
         }
 
+        // Exportar datos a Excel
         function exportarDatos() {
             // Crear un workbook de Excel
             const wb = XLSX.utils.book_new();
             
             // Convertir datos a worksheet
-            const ws = XLSX.utils.json_to_sheet(datos);
+            const wsData = [['ID', 'Fecha', 'Descripción', 'Responsable', 'Estado', 'PlanillaID']];
+            datos.forEach(dato => {
+                wsData.push([
+                    dato.id,
+                    dato.fecha,
+                    dato.descripcion,
+                    dato.responsable,
+                    dato.estado,
+                    dato.planillaId
+                ]);
+            });
+            
+            const ws = XLSX.utils.aoa_to_sheet(wsData);
             
             // Agregar la hoja al workbook
             XLSX.utils.book_append_sheet(wb, ws, "Datos Consolidados");
             
-            // Si hay planillas individuales, agregamos cada una como una hoja
-            planillas.forEach(planilla => {
-                if (planilla.datos && planilla.datos.length > 0) {
-                    const wsIndividual = XLSX.utils.json_to_sheet(planilla.datos);
-                    XLSX.utils.book_append_sheet(wb, wsIndividual, planilla.nombre.slice(0, 30)); // Excel limita nombres de hojas
-                }
-            });
-            
             // Crear archivo y descargarlo
             XLSX.writeFile(wb, "sistema_gestion_datos.xlsx");
         }
-        
-        // Backup automático cada 5 minutos
-        setInterval(guardarDatos, 5 * 60 * 1000);
-        
-        // Antes de cerrar la ventana, intentar guardar los datos
-        window.addEventListener('beforeunload', function(e) {
-            guardarDatos();
-        });
+
+        // Cerrar sesión
+        function logout() {
+            usuarioActual = null;
+            document.getElementById('loginForm').style.display = 'block';
+            document.getElementById('dashboard').style.display = 'none';
+            document.getElementById('username').value = '';
+            document.getElementById('password').value = '';
+        }
     </script>
 </body>
 </html>
