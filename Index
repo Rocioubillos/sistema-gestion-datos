@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema de Gestión de Datos</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding-top: 20px; }
+    .loading { display: none; text-align: center; margin: 20px 0; }
+    .tab-content { padding: 20px 0; }
+    .import-container { background-color: #f9f9f9; border-radius: 8px; padding: 15px; border: 1px dashed #ccc; }
+  </style>
+</head>
+<body>
+  <!-- Sección de Login -->
+  <div class="container" id="loginSection" style="max-width: 400px;">
+    <div class="card shadow">
+      <div class="card-header bg-primary text-white">
+        <h3 class="mb-0">Iniciar Sesión</h3>
+      </div>
+      <div class="card-body">
+        <div class="mb-3">
+          <label for="username" class="form-label">Usuario:</label>
+          <input type="text" class="form-control" id="username" placeholder="Ingrese su usuario">
+        </div>
+        <div class="mb-3">
+          <label for="password" class="form-label">Contraseña:</label>
+          <input type="password" class="form-control" id="password" placeholder="Ingrese su contraseña">
+        </div>
+        <button onclick="login()" class="btn btn-primary w-100">Ingresar</button>
+        <div id="loginMessage" class="alert mt-3" style="display: none;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dashboard Principal -->
+  <div class="container" id="dashboardSection" style="display: none;">
+    <div class="row mb-3">
+      <div class="col">
+        <h1>Sistema de Gestión de Datos</h1>
+      </div>
+      <div class="col-auto">
+        <div class="d-flex align-items-center">
+          <span id="currentUser" class="me-3">Usuario: </span>
+          <button onclick="logout()" class="btn btn-outline-danger"><i class="fas fa-sign-out-alt"></i> Cerrar Sesión</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pestañas de navegación -->
+    <ul class="nav nav-tabs" id="myTab" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="datos-tab" data-bs-toggle="tab" data-bs-target="#datos" type="button" role="tab">Vista General</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="planillas-tab" data-bs-toggle="tab" data-bs-target="#planillas" type="button" role="tab">Mis Planillas</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="importar-tab" data-bs-toggle="tab" data-bs-target="#importar" type="button" role="tab">Importar Datos</button>
+      </li>
+    </ul>
+
+    <!-- Contenido de las pestañas -->
+    <div class="tab-content" id="myTabContent">
+      <!-- Pestaña 1: Vista General -->
+      <div class="tab-pane fade show active" id="datos" role="tabpanel">
+        <div class="row mb-3">
+          <div class="col-md-3">
+            <select id="filtroEstado" class="form-select" onchange="filtrarDatos()">
+              <option value="todos">Todos los registros</option>
+              <option value="pendiente">Pendientes</option>
+              <option value="en_proceso">En proceso</option>
+              <option value="completado">Completados</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-striped table-hover">
+            <thead class="table-light">
+              <tr>
+                <th>ID</th>
+                <th>Fecha</th>
+                <th>Descripción</th>
+                <th>Responsable</th>
+                <th>Estado</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="datosTabla">
+              <!-- Los datos se cargarán dinámicamente -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Formulario para agregar registros -->
+        <div class="card mt-4">
+          <div class="card-header bg-primary text-white">
+            <h5 class="mb-0">Agregar Nuevo Registro</h5>
+          </div>
+          <div class="card-body">
+            <div class="row g-3">
+              <div class="col-md-8">
+                <input type="text" class="form-control" id="nuevaDescripcion" placeholder="Descripción del registro">
+              </div>
+              <div class="col-md-2">
+                <select class="form-select" id="nuevoEstado">
+                  <option value="pendiente">Pendiente</option>
+                  <option value="en_proceso">En Proceso</option>
+                  <option value="completado">Completado</option>
+                </select>
+              </div>
+              <div class="col-md-2">
+                <button onclick="agregarRegistro()" class="btn btn-primary w-100">Guardar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pestaña 2: Mis Planillas -->
+      <div class="tab-pane fade" id="planillas" role="tabpanel">
+        <h3 class="mb-4">Mis Planillas</h3>
+        <div id="planillasList" class="row row-cols-1 row-cols-md-2 g-4">
+          <!-- Las planillas se cargarán dinámicamente -->
+        </div>
+      </div>
+
+      <!-- Pestaña 3: Importar Datos -->
+      <div class="tab-pane fade" id="importar" role="tabpanel">
+        <h3 class="mb-4">Importar Datos desde Excel</h3>
+        <div class="import-container">
+          <div class="mb-3">
+            <label for="excelFile" class="form-label">Selecciona tu archivo Excel:</label>
+            <input class="form-control" type="file" id="excelFile" accept=".xlsx, .xls, .csv">
+          </div>
+          <div class="mb-3">
+            <label for="planillaNombre" class="form-label">Nombre para esta planilla:</label>
+            <input type="text" class="form-control" id="planillaNombre" placeholder="Ej: Ventas Enero 2025">
+          </div>
+          <button onclick="importarExcel()" class="btn btn-primary">Importar Datos</button>
+          <div id="importStatus" class="alert mt-3" style="display: none;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Panel de Admin (se mostrará condicionalmente) -->
+    <div class="card mt-4" id="adminPanel" style="display: none;">
+      <div class="card-header bg-dark text-white">
+        <h5 class="mb-0">Panel de Administración</h5>
+      </div>
+      <div class="card-body">
+        <h5>Gestión de Usuarios</h5>
+        <div class="row g-3 mb-4">
+          <div class="col-md-4">
+            <input type="text" class="form-control" id="nuevoUsuario" placeholder="Nombre de usuario">
+          </div>
+          <div class="col-md-3">
+            <input type="password" class="form-control" id="nuevaContrasena" placeholder="Contraseña">
+          </div>
+          <div class="col-md-3">
+            <select class="form-select" id="tipoUsuario">
+              <option value="usuario">Usuario Regular</option>
+              <option value="admin">Administrador</option>
+            </select>
+          </div>
+          <div class="col-md-2">
+            <button onclick="agregarUsuario()" class="btn btn-success w-100">Agregar</button>
+          </div>
+        </div>
+
+        <h5>Usuarios Existentes</h5>
+        <div class="table-responsive">
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>Usuario</th>
+                <th>Tipo</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="usuariosTabla">
+              <!-- Los usuarios se cargarán dinámicamente -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    // Variables globales
+    let usuarioActual = null;
+    let datos = [];
+    let planillas = [];
+    let usuarios = [];
+    
+    // Función para iniciar sesión
+    function login() {
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      
+      if (!username || !password) {
+        mostrarMensajeLogin('Por favor complete todos los campos', true);
+        return;
+      }
+      
+      mostrarCargando(true);
+      
+      google.script.run
+        .withSuccessHandler(function(usuario) {
+          if (usuario) {
+            usuarioActual = usuario;
+            document.getElementById('loginSection').style.display = 'none';
+            document.getElementById('dashboardSection').style.display = 'block';
+            document.getElementById('currentUser').textContent = 'Usuario: ' + usuario.username;
+            
+            // Mostrar panel de admin si corresponde
+            document.getElementById('adminPanel').style.display = 
+              usuario.tipo === 'admin' ? 'block' : 'none';
+            
+            // Cargar datos
+            cargarDatos();
+            cargarPlanillas();
+            
+            // Si es admin, cargar usuarios
+            if (usuario.tipo === 'admin') {
+              cargarUsuarios();
+            }
+          } else {
+            mostrarMensajeLogin('Usuario o contraseña incorrectos', true);
+          }
+          mostrarCargando(false);
+        })
+        .withFailureHandler(function(error) {
+          mostrarMensajeLogin('Error: ' + error, true);
+          mostrarCargando(false);
+        })
+        .verificarCredenciales(username, password);
+    }
+    
+    // Cargar datos
+    function cargarDatos() {
+      mostrarCargando(true);
+      
+      google.script.run
+        .withSuccessHandler(function(result) {
+          datos = result;
+          filtrarDatos();
+          mostrarCargando(false);
+        })
+        .withFailureHandler(function(error) {
+          alert('Error al cargar datos: ' + error);
+          mostrarCargando(false);
+        })
+        .obtenerDatos();
+    }
+    
+    // Filtrar datos según el estado seleccionado
+    function filtrarDatos() {
+      const filtro = document.getElementById('filtroEstado').value;
+      const tbody = document.getElementById('datosTabla');
+      tbody.innerHTML = '';
+      
+      let datosFiltrados = datos;
+      if (filtro !== 'todos') {
+        datosFiltrados = datos.filter(d => d.estado === filtro);
+      }
+      
+      datosFiltrados.forEach(dato => {
+        const tr = document.createElement('tr');
+        
+        // Colorear según estado
+        if (dato.estado === 'completado') {
+          tr.classList.add('table-success');
+        } else if (dato.estado === 'en_proceso') {
+          tr.classList.add('table-warning');
+        }
+        
+        tr.innerHTML = `
+          <td>${dato.id}</td>
+          <td>${dato.fecha}</td>
+          <td>${dato.descripcion}</td>
+          <td>${dato.responsable}</td>
+          <td><span class="badge ${getBadgeClass(dato.estado)}">${dato.estado}</span></td>
+          <td>
+            <button onclick="editarRegistro('${dato.id}')" class="btn btn-sm btn-outline-primary">
+              <i class="fas fa-edit"></i>
+            </button>
+            ${usuarioActual.tipo === 'admin' ? 
+              `<button onclick="eliminarRegistro('${dato.id}')" class="btn btn-sm btn-outline-danger ms-1">
+                <i class="fas fa-trash"></i>
+              </button>` : ''}
+          </td>
+        `;
+        
+        tbody.appendChild(tr);
+      });
+    }
+    
+    // Obtener clase de badge según estado
+    function getBadgeClass(estado) {
+      switch (estado) {
+        case 'pendiente': return 'bg-secondary';
+        case 'en_proceso': return 'bg-warning text-dark';
+        case 'completado': return 'bg-success';
+        default: return 'bg-secondary';
+      }
+    }
+    
+    // Agregar nuevo registro
+    function agregarRegistro() {
+      const descripcion = document.getElementById('nuevaDescripcion').value;
+      const estado = document.getElementById('nuevoEstado').value;
+      
+      if (!descripcion) {
+        alert('Por favor ingrese una descripción');
+        return;
+      }
+      
+      mostrarCargando(true);
+      
+      google.script.run
+        .withSuccessHandler(function(nuevoId) {
+          document.getElementById('nuevaDescripcion').value = '';
+          cargarDatos(); // Recargar todos los datos
+        })
+        .withFailureHandler(function(error) {
+          alert('Error al agregar registro: ' + error);
+          mostrarCargando(false);
+        })
+        .agregarRegistro(descripcion, usuarioActual.username, estado, '');
+    }
+    
+    // Editar registro existente
+    function editarRegistro(id) {
+      const registro = datos.find(d => d.id === id);
+      if (!registro) return;
+      
+      const nuevaDescripcion = prompt('Editar descripción:', registro.descripcion);
+      const nuevoEstado = prompt('Editar estado (pendiente, en_proceso, completado):', registro.estado);
+      
+      if (nuevaDescripcion !== null && nuevoEstado !== null) {
+        mostrarCargando(true);
+        
+        // Aquí implementaríamos la edición - por simplicidad, recargamos los datos
+        // Esta función no está implementada en el backend por brevedad
+        alert('Funcionalidad de edición no implementada en esta demo simplificada');
+        mostrarCargando(false);
+      }
+    }
+    
+    // Cargar planillas
+    function cargarPlanillas() {
+      mostrarCargando(true);
+      
+      google.script.run
+        .withSuccessHandler(function(result) {
+          planillas = result;
+          mostrarPlanillas();
+          mostrarCargando(false);
+        })
+        .withFailureHandler(function(error) {
+          alert('Error al cargar planillas: ' + error);
+          mostrarCargando(false);
+        })
+        .obtenerPlanillas();
+    }
+    
+    // Mostrar planillas en la interfaz
+    function mostrarPlanillas() {
+      const container = document.getElementById('planillasList');
+      container.innerHTML = '';
+      
+      // Filtrar planillas del usuario actual o mostrar todas si es admin
+      const misPlanillas = usuarioActual.tipo === 'admin' 
+        ? planillas 
+        : planillas.filter(p => p.usuario === usuarioActual.username);
+      
+      if (misPlanillas.length === 0) {
+        container.innerHTML = '<div class="col"><div class="alert alert-info">No tienes planillas importadas. Ve a la pestaña "Importar Datos" para agregar tu primera planilla.</div></div>';
+        return;
+      }
+      
+      misPlanillas.forEach(planilla => {
+        const card = document.createElement('div');
+        card.className = 'col';
+        card.innerHTML = `
+          <div class="card h-100">
+            <div class="card-header">
+              <h5 class="mb-0">${planilla.nombre}</h5>
+            </div>
+            <div class="card-body">
+              <p class="card-text">
+                <small class="text-muted">Importada el ${planilla.fecha}</small><br>
+                <small class="text-muted">Usuario: ${planilla.usuario}</small>
+              </p>
+            </div>
+            <div class="card-footer">
+              <button onclick="verPlanilla('${planilla.hojaId}')" class="btn btn-sm btn-primary">
+                <i class="fas fa-table me-1"></i> Ver Datos
+              </button>
+              <button onclick="eliminarPlanilla('${planilla.id}')" class="btn btn-sm btn-danger">
+                <i class="fas fa-trash me-1"></i> Eliminar
+              </button>
+            </div>
+          </div>
+        `;
+        
+        container.appendChild(card);
+      });
+    }
+    
+    // Importar datos desde Excel
+    function importarExcel() {
+      const fileInput = document.getElementById('excelFile');
+      const nombrePlanilla = document.getElementById('planillaNombre').value;
+      
+      if (!fileInput.files.length) {
+        mostrarEstadoImportacion('Por favor selecciona un archivo Excel', true);
+        return;
+      }
+      
+      if (!nombrePlanilla) {
+        mostrarEstadoImportacion('Por favor ingresa un nombre para esta planilla', true);
+        return;
+      }
+      
+      mostrarCargando(true);
+      mostrarEstadoImportacion('Procesando archivo...', false);
+      
+      const file = fileInput.files[0];
+      const reader = new FileReader();
+      
+      reader.onload = function(e) {
+        try {
+          const data = e.target.result;
+          const workbook = XLSX.read(data, { type: 'binary' });
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          const json = XLSX.utils.sheet_to_json(worksheet);
+          
+          if (json.length === 0) {
+            mostrarEstadoImportacion('El archivo no contiene datos válidos', true);
+            mostrarCargando(false);
+            return;
+          }
+          
+          // Obtener las claves (encabezados) del primer objeto
+          const headers = Object.keys(json[0]);
+          
+          // Crear filas de datos incluyendo encabezados
+          const rows = [headers];
+          json.forEach(item => {
+            const row = headers.map(header => item[header] || '');
+            rows.push(row);
+          });
+          
+          // Primero crear una nueva hoja para la planilla
+          google.script.run
+            .withSuccessHandler(function(hojaId) {
+              // Guardar los datos en la hoja
+              google.script.run
+                .withSuccessHandler(function(exito) {
+                  if (exito) {
+                    // Registrar la planilla
+                    google.script.run
+                      .withSuccessHandler(function(planillaId) {
+                        // Agregar registros a la tabla principal
+                        const promesas = [];
+                        let procesados = 0;
+                        
+                        json.forEach((item, index) => {
+                          // Intentamos mapear las columnas de Excel a nuestro formato
+                          const descripcion = item.Descripcion || item.descripcion || 
+                                            item.Concepto || item.concepto || 
+                                            Object.values(item)[0] || 'Registro importado';
+                          
+                          google.script.run
+                            .withSuccessHandler(function() {
+                              procesados++;
+                              if (procesados === json.length) {
+                                // Todos los registros procesados
+                                mostrarEstadoImportacion(`Planilla "${nombrePlanilla}" importada correctamente con ${json.length} registros`, false);
+                                fileInput.value = '';
+                                document.getElementById('planillaNombre').value = '';
+                                cargarDatos();
+                                cargarPlanillas();
+                                mostrarCargando(false);
+                              }
+                            })
+                            .withFailureHandler(function(error) {
+                              mostrarEstadoImportacion('Error al importar registros: ' + error, true);
+                              mostrarCargando(false);
+                            })
+                            .agregarRegistro(descripcion, usuarioActual.username, 'pendiente', planillaId);
+                        });
+                      })
+                      .withFailureHandler(function(error) {
+                        mostrarEstadoImportacion('Error al registrar planilla: ' + error, true);
+                        mostrarCargando(false);
+                      })
+                      .registrarPlanilla(nombrePlanilla, usuarioActual.username, hojaId);
+                  } else {
+                    mostrarEstadoImportacion('Error al guardar datos en la hoja', true);
+                    mostrarCargando(false);
+                  }
+                })
+                .withFailureHandler(function(error) {
+                  mostrarEstadoImportacion('Error al guardar datos: ' + error, true);
+                  mostrarCargando(false);
+                })
+                .guardarDatosPlanilla(hojaId, rows);
+            })
+            .withFailureHandler(function(error) {
+              mostrarEstadoImportacion('Error al crear hoja: ' + error, true);
+              mostrarCargando(false);
+            })
+            .crearHojaPlanilla(nombrePlanilla);
+          
+        } catch (error) {
+          mostrarEstadoImportacion('Error al procesar el archivo: ' + error.message, true);
+          mostrarCargando(false);
+        }
+      };
+      
+      reader.onerror = function() {
+        mostrarEstadoImportacion('Error al leer el archivo', true);
+        mostrarCargando(false);
+      };
+      
+      reader.readAsBinaryString(file);
+    }
+    
+    // Ver datos de una planilla
+    function verPlanilla(hojaId) {
+      mostrarCargando(true);
+      
+      google.script.run
+        .withSuccessHandler(function(data) {
+          if (!data || data.length === 0) {
+            alert('Esta planilla no contiene datos');
+            mostrarCargando(false);
+            return;
+          }
+          
+          // Crear una ventana modal para mostrar los datos
+          const modal = document.createElement('div');
+          modal.style.position = 'fixed';
+          modal.style.left = '0';
+          modal.style.top = '0';
+          modal.style.width = '100%';
+          modal.style.height = '100%';
+          modal.style.backgroundColor = 'rgba(0,0,0,0.7)';
+          modal.style.zIndex = '1000';
+          modal.style.display = 'flex';
+          modal.style.justifyContent = 'center';
+          modal.style.alignItems = 'center';
+          
+          const modalContent = document.createElement('div');
+          modalContent.className = 'card';
+          modalContent.style.width = '80%';
+          modalContent.style.maxHeight = '80%';
+          modalContent.style.overflow = 'auto';
+          
+          const closeButton = document.createElement('button');
+          closeButton.innerHTML = '&times;';
+          closeButton.className = 'btn btn-danger btn-sm position-absolute';
+          closeButton.style.right = '10px';
+          closeButton.style.top = '10px';
+          closeButton.onclick = function() {
+            document.body.removeChild(modal);
+          };
+          
+          // Contenido de la planilla
+          const headers = data[0];
+          const rows = data.slice(1);
+          
+          const table = document.createElement('table');
+          table.className = 'table table-striped table-sm';
+          
+          // Encabezados
+          const thead = document.createElement('thead');
+          const headerRow = document.createElement('tr');
+          
+          headers.forEach(header => {
+            const th = document.createElement('th');
+            th.textContent = header;
+            headerRow.appendChild(th);
+          });
+          
+          thead.appendChild(headerRow);
+          table.appendChild(thead);
+          
+          // Datos
+          const tbody = document.createElement('tbody');
+          
+          rows.forEach(row => {
+            const tr = document.createElement('tr');
+            
+            row.forEach(cell => {
+              const td = document.createElement('td');
+              td.textContent = cell;
+              tr.appendChild(td);
+            });
+            
+            tbody.appendChild(tr);
+          });
+          
+          table.appendChild(tbody);
+          
+          // Estructurar el modal
+          const cardHeader = document.createElement('div');
+          cardHeader.className = 'card-header';
+          cardHeader.innerHTML = '<h5 class="mb-0">Datos de la Planilla</h5>';
+          modalContent.appendChild(cardHeader);
+          
+          const cardBody = document.createElement('div');
+          cardBody.className = 'card-body';
+          cardBody.appendChild(table);
+          modalContent.appendChild(cardBody);
+          
+          modalContent.appendChild(closeButton);
+          modal.appendChild(modalContent);
+          document.body.appendChild(modal);
+          
+          mostrarCargando(false);
+        })
+        .withFailureHandler(function(error) {
+          alert('Error al cargar datos de planilla: ' + error);
+          mostrarCargando(false);
+        })
+        .obtenerDatosPlanilla(hojaId);
+    }
+    
+    // Eliminar una planilla
+    function eliminarPlanilla(planillaId) {
+      if (confirm('¿Estás seguro que deseas eliminar esta planilla? Esta acción no se puede deshacer.')) {
+        // Esta función no está implementada en el backend por brevedad
+        alert('Funcionalidad de eliminación no implementada en esta demo simplificada');
+      }
+    }
+    
+    // Funciones para administración de usuarios (solo admin)
+    function cargarUsuarios() {
+      mostrarCargando(true);
+      
+      google.script.run
+        .withSuccessHandler(function(result) {
+          usuarios = result;
+          mostrarUsuarios();
+          mostrarCargando(false);
+        })
+        .withFailureHandler(function(error) {
+          alert('Error al cargar usuarios: ' + error);
+          mostrarCargando(false);
+        })
+        .obtenerUsuarios();
+    }
+    
+    function mostrarUsuarios() {
+      const tbody = document.getElementById('usuariosTabla');
+      tbody.innerHTML = '';
+      
+      usuarios.forEach(usuario => {
+        const tr = document.createElement('tr');
+        
+        tr.innerHTML = `
+          <td>${usuario.username}</td>
+          <td><span class="badge ${usuario.tipo === 'admin' ? 'bg-danger' : 'bg-primary'}">${usuario.tipo}</span></td>
+          <td>
+            <button onclick="cambiarTipoUsuario('${usuario.username}')" class="btn btn-sm btn-outline-secondary">
+              Cambiar Tipo
+            </button>
+            ${usuario.username !== 'admin' ? 
+              `<button onclick="eliminarUsuario('${usuario.username}')" class="btn btn-sm btn-outline-danger ms-1">
+                Eliminar
+              </button>` : ''}
+          </td>
+        `;
+        
+        tbody.appendChild(tr);
+      });
+    }
+    
+    function agregarUsuario() {
+      const nuevoUsuario = document.getElementById('nuevoUsuario').value;
+      const nuevaContrasena = document.getElementById('nuevaContrasena').value;
+      const tipoUsuario = document.getElementById('tipoUsuario').value;
+      
+      if (!nuevoUsuario || !nuevaContrasena) {
+        alert('Por favor complete todos los campos');
+        return;
+      }
+      
+      mostrarCargando(true);
+      
+      google.script.run
+        .withSuccessHandler(function(exito) {
+          if (exito) {
+            document.getElementById('nuevoUsuario').value = '';
+            document.getElementById('nuevaContrasena').value = '';
+            cargarUsuarios();
+            alert('Usuario agregado correctamente');
+          } else {
+            alert('El nombre de usuario ya existe');
+          }
+          mostrarCargando(false);
+        })
+        .withFailureHandler(function(error) {
+          alert('Error al agregar usuario: ' + error);
+          mostrarCargando(false);
+        })
+        .agregarUsuario(nuevoUsuario, nuevaContrasena, tipoUsuario);
+    }
+    
+    function cambiarTipoUsuario(username) {
+      // Esta función no está implementada en el backend por brevedad
+      alert('Funcionalidad no implementada en esta demo simplificada');
+    }
+    
+    function eliminarUsuario(username) {
+      // Esta función no está implementada en el backend por brevedad
+      alert('Funcionalidad no implementada en esta demo simplificada');
+    }
+    
+    // Funciones de utilidad
+    function mostrarMensajeLogin(mensaje, esError) {
+      const msgElement = document.getElementById('loginMessage');
+      msgElement.textContent = mensaje;
+      msgElement.style.display = 'block';
+      
+      if (esError) {
+        msgElement.classList.remove('alert-success');
+        msgElement.classList.add('alert-danger');
+      } else {
+        msgElement.classList.remove('alert-danger');
+        msgElement.classList.add('alert-success');
+      }
+      
+      setTimeout(() => {
+        msgElement.style.display = 'none';
+      }, 5000);
+    }
+    
+    function mostrarEstadoImportacion(mensaje, esError) {
+      const statusElement = document.getElementById('importStatus');
+      statusElement.textContent = mensaje;
+      statusElement.style.display = 'block';
+      
+      if (esError) {
+        statusElement.classList.remove('alert-success');
+        statusElement.classList.add('alert-danger');
+      } else {
+        statusElement.classList.remove('alert-danger');
+        statusElement.classList.add('alert-success');
+      }
+      
+      setTimeout(() => {
+        statusElement.style.display = 'none';
+      }, 5000);
+    }
+    
+    function mostrarCargando(mostrar) {
+      // Implementar indicador de carga si se necesita
+    }
+    
+    // Cerrar sesión
+    function logout() {
+      usuarioActual = null;
+      document.getElementById('loginSection').style.display = 'block';
+      document.getElementById('dashboardSection').style.display = 'none';
+      document.getElementById('username').value = '';
+      document.getElementById('password').value = '';
+    }
+  </script>
+</body>
+</html>
